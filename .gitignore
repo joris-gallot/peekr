@@ -18,3 +18,5 @@ web/dist/
 .vscode/*
 !.vscode/extensions.json
 .idea/
+
+.playwright-mcp/
