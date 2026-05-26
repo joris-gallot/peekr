@@ -7,7 +7,7 @@ import AppSidebar from '@/components/AppSidebar.vue'
 import LogPane from '@/components/LogPane.vue'
 import StatsBar from '@/components/StatsBar.vue'
 import { Badge } from '@/components/ui/badge'
-import { SidebarProvider } from '@/components/ui/sidebar'
+import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { useLogStream } from '@/composables/useLogStream'
 import { mergeByTime } from '@/lib/merge'
 import { isRunning } from '@/types'
@@ -163,58 +163,59 @@ onBeforeUnmount(() => {
     />
 
     <div
-      class="w-1 shrink-0 cursor-col-resize bg-border/40 transition-colors hover:bg-primary/60"
+      class="w-1 shrink-0 cursor-col-resize bg-border/40 transition-colors hover:bg-primary/60 peer-data-[state=collapsed]:hidden"
       @pointerdown="startResize"
     />
 
     <main class="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
-      <template v-if="streams.length">
-        <header class="flex min-h-13 items-center gap-3 border-b px-4 py-2">
-          <template v-if="single">
-            <span class="font-medium">{{ single.name }}</span>
-            <Badge :variant="isRunning(single) ? 'default' : 'secondary'">
-              {{ single.status }}
-            </Badge>
-            <span v-if="streams[0].conn.value === 'error'" class="flex items-center gap-1 text-xs text-red-400">
-              <span class="size-1.5 animate-pulse rounded-full bg-red-500" />reconnecting
+      <div class="flex min-h-13 items-center gap-3 border-b px-3 py-2">
+        <SidebarTrigger class="-ml-1 size-7 shrink-0 text-muted-foreground" />
+        <template v-if="single">
+          <span class="font-medium">{{ single.name }}</span>
+          <Badge :variant="isRunning(single) ? 'default' : 'secondary'">
+            {{ single.status }}
+          </Badge>
+          <span v-if="streams[0].conn.value === 'error'" class="flex items-center gap-1 text-xs text-red-400">
+            <span class="size-1.5 animate-pulse rounded-full bg-red-500" />reconnecting
+          </span>
+          <span v-else-if="streams[0].conn.value === 'connecting'" class="text-xs text-muted-foreground">connecting</span>
+          <span class="ml-auto truncate text-xs text-muted-foreground">{{ single.image }}</span>
+        </template>
+        <template v-else-if="streams.length">
+          <div class="flex flex-wrap items-center gap-1.5">
+            <span
+              v-for="s in streams"
+              :key="s.id"
+              class="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs"
+              :style="{ color: colorFor(s.id), backgroundColor: `${colorFor(s.id)}1a` }"
+            >
+              <span v-if="s.conn.value === 'error'" class="size-1.5 animate-pulse rounded-full bg-current" />
+              <span class="max-w-40 truncate">{{ shortName(s.id) }}</span>
+              <button class="opacity-50 hover:opacity-100" @click="removeStream(s.id); syncStats()">✕</button>
             </span>
-            <span v-else-if="streams[0].conn.value === 'connecting'" class="text-xs text-muted-foreground">connecting</span>
-            <span class="ml-auto truncate text-xs text-muted-foreground">{{ single.image }}</span>
-          </template>
-          <template v-else>
-            <div class="flex flex-wrap items-center gap-1.5">
-              <span
-                v-for="s in streams"
-                :key="s.id"
-                class="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs"
-                :style="{ color: colorFor(s.id), backgroundColor: `${colorFor(s.id)}1a` }"
-              >
-                <span v-if="s.conn.value === 'error'" class="size-1.5 animate-pulse rounded-full bg-current" />
-                <span class="max-w-40 truncate">{{ shortName(s.id) }}</span>
-                <button class="opacity-50 hover:opacity-100" @click="removeStream(s.id); syncStats()">✕</button>
-              </span>
-            </div>
-            <div class="ml-auto flex shrink-0 overflow-hidden rounded-md border text-xs">
-              <button
-                class="flex items-center gap-1.5 px-2 py-1 transition-colors"
-                :class="viewMode === 'merged' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50'"
-                title="Merged timeline"
-                @click="setView('merged')"
-              >
-                <Rows3 :size="13" />merged
-              </button>
-              <button
-                class="flex items-center gap-1.5 border-l px-2 py-1 transition-colors"
-                :class="viewMode === 'split' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50'"
-                title="Side-by-side panes"
-                @click="setView('split')"
-              >
-                <Columns2 :size="13" />split
-              </button>
-            </div>
-          </template>
-        </header>
+          </div>
+          <div class="ml-auto flex shrink-0 overflow-hidden rounded-md border text-xs">
+            <button
+              class="flex items-center gap-1.5 px-2 py-1 transition-colors"
+              :class="viewMode === 'merged' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50'"
+              title="Merged timeline"
+              @click="setView('merged')"
+            >
+              <Rows3 :size="13" />merged
+            </button>
+            <button
+              class="flex items-center gap-1.5 border-l px-2 py-1 transition-colors"
+              :class="viewMode === 'split' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50'"
+              title="Side-by-side panes"
+              @click="setView('split')"
+            >
+              <Columns2 :size="13" />split
+            </button>
+          </div>
+        </template>
+      </div>
 
+      <template v-if="streams.length">
         <StatsBar v-if="single" :stats="stats" :cpu="cpuHistory" :mem="memHistory" />
 
         <div class="border-b px-2 py-1.5">

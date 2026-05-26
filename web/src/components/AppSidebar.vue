@@ -64,7 +64,7 @@ function setGroupOpen(project: string, open: boolean) {
 </script>
 
 <template>
-  <Sidebar collapsible="none" class="border-r">
+  <Sidebar collapsible="offcanvas" class="border-r">
     <SidebarHeader class="gap-2 border-b">
       <div class="flex items-center gap-2">
         <span class="text-lg font-semibold tracking-tight">peekr</span>
