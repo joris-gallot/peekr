@@ -14,7 +14,8 @@ export function groupContainers<T extends Groupable>(list: T[]): ContainerGroup<
   for (const item of list) {
     const key = item.project || ''
     const bucket = buckets.get(key)
-    if (bucket) bucket.push(item)
+    if (bucket)
+      bucket.push(item)
     else buckets.set(key, [item])
   }
 
@@ -24,8 +25,10 @@ export function groupContainers<T extends Groupable>(list: T[]): ContainerGroup<
   }))
 
   groups.sort((a, b) => {
-    if (a.project === '') return 1
-    if (b.project === '') return -1
+    if (a.project === '')
+      return 1
+    if (b.project === '')
+      return -1
     return a.project.localeCompare(b.project)
   })
   return groups

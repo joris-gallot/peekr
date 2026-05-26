@@ -37,12 +37,15 @@ const STRING_ALIASES: Record<string, LogLevel> = {
 }
 
 function normalizeLevel(v: unknown): LogLevel | null {
-  if (typeof v === 'number') return PINO_LEVELS[v] ?? null
+  if (typeof v === 'number')
+    return PINO_LEVELS[v] ?? null
   if (typeof v === 'string') {
     const s = v.trim().toLowerCase()
-    if (s in STRING_ALIASES) return STRING_ALIASES[s]
+    if (s in STRING_ALIASES)
+      return STRING_ALIASES[s]
     const n = Number(s)
-    if (!Number.isNaN(n) && n in PINO_LEVELS) return PINO_LEVELS[n]
+    if (!Number.isNaN(n) && n in PINO_LEVELS)
+      return PINO_LEVELS[n]
   }
   return null
 }
@@ -58,7 +61,8 @@ export function parseLog(raw: string): ParsedLog {
         for (const k of LEVEL_KEYS) {
           if (k in json) {
             level = normalizeLevel(json[k])
-            if (level) break
+            if (level)
+              break
           }
         }
         let message = ''
@@ -70,7 +74,8 @@ export function parseLog(raw: string): ParsedLog {
         }
         return { raw, json, level, message: message || trimmed, expanded: false }
       }
-    } catch {
+    }
+    catch {
       // not JSON, fall through to plain
     }
   }
@@ -89,14 +94,16 @@ export function parseFilter(query: string): FilterTerm[] {
     .filter(Boolean)
     .map((token) => {
       const eq = token.indexOf('=')
-      if (eq > 0) return { path: token.slice(0, eq), value: token.slice(eq + 1).toLowerCase() }
+      if (eq > 0)
+        return { path: token.slice(0, eq), value: token.slice(eq + 1).toLowerCase() }
       return { path: null, value: token.toLowerCase() }
     })
 }
 
 function getPath(obj: Record<string, unknown>, path: string): unknown {
   return path.split('.').reduce<unknown>((acc, key) => {
-    if (acc && typeof acc === 'object') return (acc as Record<string, unknown>)[key]
+    if (acc && typeof acc === 'object')
+      return (acc as Record<string, unknown>)[key]
     return undefined
   }, obj)
 }
@@ -104,10 +111,13 @@ function getPath(obj: Record<string, unknown>, path: string): unknown {
 export function matchesFilter(log: ParsedLog, terms: FilterTerm[]): boolean {
   return terms.every((term) => {
     if (term.path) {
-      if (term.path === 'level') return (log.level ?? '').includes(term.value)
-      if (!log.json) return false
+      if (term.path === 'level')
+        return (log.level ?? '').includes(term.value)
+      if (!log.json)
+        return false
       const v = getPath(log.json, term.path)
-      if (v == null) return false
+      if (v == null)
+        return false
       return String(v).toLowerCase().includes(term.value)
     }
     return log.raw.toLowerCase().includes(term.value)
@@ -116,24 +126,32 @@ export function matchesFilter(log: ParsedLog, terms: FilterTerm[]): boolean {
 
 /** RFC3339 -> HH:MM:SS, empty on parse failure. */
 export function formatTime(ts: string | null): string {
-  if (!ts) return ''
+  if (!ts)
+    return ''
   const d = new Date(ts)
-  if (Number.isNaN(d.getTime())) return ''
+  if (Number.isNaN(d.getTime()))
+    return ''
   return d.toTimeString().slice(0, 8)
 }
 
 export type JsonValueKind = 'string' | 'number' | 'boolean' | 'null' | 'complex'
 
 export function valueKind(v: unknown): JsonValueKind {
-  if (v === null) return 'null'
-  if (typeof v === 'string') return 'string'
-  if (typeof v === 'number') return 'number'
-  if (typeof v === 'boolean') return 'boolean'
+  if (v === null)
+    return 'null'
+  if (typeof v === 'string')
+    return 'string'
+  if (typeof v === 'number')
+    return 'number'
+  if (typeof v === 'boolean')
+    return 'boolean'
   return 'complex'
 }
 
 export function displayValue(v: unknown): string {
-  if (v === null) return 'null'
-  if (typeof v === 'object') return JSON.stringify(v)
+  if (v === null)
+    return 'null'
+  if (typeof v === 'object')
+    return JSON.stringify(v)
   return String(v)
 }

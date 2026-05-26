@@ -1,13 +1,14 @@
 <script setup lang="ts">
+import type { JsonValueKind, LogLevel, ParsedLog } from '@/lib/logfmt'
+import { VisArea, VisXYContainer } from '@unovis/vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
-import { Skeleton } from '@/components/ui/skeleton'
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
+import { Input } from '@/components/ui/input'
 import {
   Sidebar,
   SidebarContent,
@@ -20,15 +21,14 @@ import {
   SidebarMenuItem,
   SidebarProvider,
 } from '@/components/ui/sidebar'
-import { VisArea, VisXYContainer } from '@unovis/vue'
+import { Skeleton } from '@/components/ui/skeleton'
 import { groupContainers } from '@/lib/group'
 import {
-  type JsonValueKind,
-  type LogLevel,
-  type ParsedLog,
   displayValue,
   formatTime,
+
   matchesFilter,
+
   parseFilter,
   parseLog,
   valueKind,
@@ -118,24 +118,26 @@ let stick = true
 function loadOpenGroups(): Record<string, boolean> {
   try {
     return JSON.parse(localStorage.getItem('peekr.openGroups') || '{}')
-  } catch {
+  }
+  catch {
     return {}
   }
 }
 
 const filteredContainers = computed(() =>
-  containers.value.filter((c) => c.name.toLowerCase().includes(filter.value.toLowerCase())),
+  containers.value.filter(c => c.name.toLowerCase().includes(filter.value.toLowerCase())),
 )
 const filterActive = computed(() => filter.value.trim().length > 0)
 const groups = computed(() => groupContainers(filteredContainers.value))
 
 const visibleLogs = computed(() => {
   const terms = parseFilter(logFilter.value)
-  if (!terms.length) return entries.value
-  return entries.value.filter((e) => matchesFilter(e.log, terms))
+  if (!terms.length)
+    return entries.value
+  return entries.value.filter(e => matchesFilter(e.log, terms))
 })
 
-watch(openGroups, (v) => localStorage.setItem('peekr.openGroups', JSON.stringify(v)))
+watch(openGroups, v => localStorage.setItem('peekr.openGroups', JSON.stringify(v)))
 
 function isRunning(c: ContainerInfo) {
   return c.state.toLowerCase().includes('running')
@@ -154,13 +156,16 @@ function chipClass(level: LogLevel | null) {
 }
 
 function accentClass(e: Entry) {
-  if (e.log.level) return LEVEL_ACCENT[e.log.level]
-  if (e.stream === 'stderr') return 'border-l-red-500/50'
+  if (e.log.level)
+    return LEVEL_ACCENT[e.log.level]
+  if (e.stream === 'stderr')
+    return 'border-l-red-500/50'
   return 'border-l-transparent'
 }
 
 function msgClass(e: Entry) {
-  if (e.stream === 'stderr' && !e.log.level) return 'text-red-300'
+  if (e.stream === 'stderr' && !e.log.level)
+    return 'text-red-300'
   return 'text-foreground/90'
 }
 
@@ -183,10 +188,12 @@ function startResize(e: PointerEvent) {
 async function loadContainers() {
   try {
     const res = await fetch('/api/containers')
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    if (!res.ok)
+      throw new Error(`HTTP ${res.status}`)
     containers.value = await res.json()
     listError.value = ''
-  } catch (e) {
+  }
+  catch (e) {
     listError.value = e instanceof Error ? e.message : 'failed to load containers'
   }
 }
@@ -211,8 +218,10 @@ function openStats(id: string) {
     stats.value = s
     cpuHistory.value.push(s.cpu_pct)
     memHistory.value.push(s.mem_pct)
-    if (cpuHistory.value.length > STATS_POINTS) cpuHistory.value.shift()
-    if (memHistory.value.length > STATS_POINTS) memHistory.value.shift()
+    if (cpuHistory.value.length > STATS_POINTS)
+      cpuHistory.value.shift()
+    if (memHistory.value.length > STATS_POINTS)
+      memHistory.value.shift()
   }
 }
 
@@ -220,7 +229,8 @@ const sparkX = (_: number, i: number) => i
 const sparkY = (v: number) => v
 
 function formatBytes(n: number): string {
-  if (n <= 0) return '0 B'
+  if (n <= 0)
+    return '0 B'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   const i = Math.min(Math.floor(Math.log(n) / Math.log(1024)), units.length - 1)
   return `${(n / 1024 ** i).toFixed(i ? 1 : 0)} ${units[i]}`
@@ -235,42 +245,49 @@ function openStream(id: string) {
 
   source = new EventSource(url)
   source.onopen = () => (conn.value = 'open')
-  source.onmessage = (e) => appendLine(JSON.parse(e.data) as LogLine)
+  source.onmessage = e => appendLine(JSON.parse(e.data) as LogLine)
   source.addEventListener('stream-error', () => (conn.value = 'error'))
   source.onerror = () => {
     conn.value = 'error'
     // stop EventSource native retry (it drops `since`); resume ourselves
     closeStream()
     reconnectTimer = setTimeout(() => {
-      if (selected.value?.id === id) openStream(id)
+      if (selected.value?.id === id)
+        openStream(id)
     }, 2000)
   }
 }
 
 function appendLine(line: LogLine) {
   // monotonic dedup: timestamps are ordered, so skip anything <= last seen
-  if (line.ts && lastTs && line.ts <= lastTs) return
-  if (line.ts) lastTs = line.ts
+  if (line.ts && lastTs && line.ts <= lastTs)
+    return
+  if (line.ts)
+    lastTs = line.ts
 
   entries.value.push({ ts: line.ts, stream: line.stream, log: parseLog(line.msg) })
-  if (entries.value.length > 2000) entries.value.splice(0, entries.value.length - 2000)
+  if (entries.value.length > 2000)
+    entries.value.splice(0, entries.value.length - 2000)
 
   if (stick) {
     nextTick(() => {
       const el = logPane.value
-      if (el) el.scrollTop = el.scrollHeight
+      if (el)
+        el.scrollTop = el.scrollHeight
     })
   }
 }
 
 function onScroll() {
   const el = logPane.value
-  if (!el) return
+  if (!el)
+    return
   stick = el.scrollHeight - el.scrollTop - el.clientHeight < 40
 }
 
 function toggle(e: Entry) {
-  if (e.log.json) e.log.expanded = !e.log.expanded
+  if (e.log.json)
+    e.log.expanded = !e.log.expanded
 }
 
 function select(c: ContainerInfo) {
@@ -291,7 +308,8 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   closeStream()
-  if (listTimer) clearInterval(listTimer)
+  if (listTimer)
+    clearInterval(listTimer)
 })
 </script>
 
@@ -301,13 +319,17 @@ onBeforeUnmount(() => {
       <SidebarHeader class="gap-2 border-b">
         <div class="flex items-center gap-2">
           <span class="text-lg font-semibold tracking-tight">peekr</span>
-          <Badge variant="secondary" class="ml-auto">{{ containers.length }}</Badge>
+          <Badge variant="secondary" class="ml-auto">
+            {{ containers.length }}
+          </Badge>
         </div>
         <Input v-model="filter" placeholder="Filter containers..." class="h-8" />
       </SidebarHeader>
 
       <SidebarContent class="gap-0">
-        <p v-if="listError" class="px-3 py-2 text-xs text-red-500">{{ listError }}</p>
+        <p v-if="listError" class="px-3 py-2 text-xs text-red-500">
+          {{ listError }}
+        </p>
 
         <Collapsible
           v-for="g in groups"

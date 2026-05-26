@@ -1,8 +1,9 @@
+import type { ParsedLog } from './logfmt'
 import { describe, expect, it } from 'vitest'
 import {
-  type ParsedLog,
   formatTime,
   matchesFilter,
+
   parseFilter,
   parseLog,
   valueKind,
