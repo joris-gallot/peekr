@@ -1,0 +1,324 @@
+<script setup lang="ts">
+import type { LogStream } from '@/composables/useLogStream'
+import type { ContainerInfo, StatsSample } from '@/types'
+import { Columns2, Regex, Rows3 } from '@lucide/vue'
+import { useIntervalFn, useLocalStorage } from '@vueuse/core'
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import AppSidebar from '@/components/AppSidebar.vue'
+import LogPane from '@/components/LogPane.vue'
+import StatsBar from '@/components/StatsBar.vue'
+import { Badge } from '@/components/ui/badge'
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
+import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { useLogStream } from '@/composables/useLogStream'
+import { isFilterValid } from '@/lib/logfmt'
+import { mergeByTime } from '@/lib/merge'
+import { isRunning } from '@/types'
+
+// stable per-container accent colors for the merged timeline / split headers
+const PALETTE = ['#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#f472b6', '#fb923c', '#22d3ee', '#a3e635']
+
+const route = useRoute()
+const router = useRouter()
+
+const containers = ref<ContainerInfo[]>([])
+const listError = ref('')
+const logFilter = ref('')
+const logRegex = useLocalStorage('peekr.logRegex', false)
+const filterValid = computed(() => isFilterValid(logFilter.value, logRegex.value))
+const streams = shallowRef<LogStream[]>([])
+const viewMode = useLocalStorage<'merged' | 'split'>('peekr.viewMode', 'merged')
+
+const stats = ref<StatsSample | null>(null)
+const cpuHistory = ref<number[]>([])
+const memHistory = ref<number[]>([])
+const STATS_POINTS = 60
+
+const sidebarWidth = useLocalStorage('peekr.sidebarWidth', '16rem')
+const resizing = ref(false)
+
+let statsSource: EventSource | null = null
+
+const selectedIds = computed(() => streams.value.map(s => s.id))
+const single = computed(() => (streams.value.length === 1 ? containerById(streams.value[0].id) : null))
+const merged = computed(() => mergeByTime(streams.value.map(s => s.entries.value)))
+
+function containerById(id: string) {
+  return containers.value.find(c => c.id === id)
+}
+function shortName(id: string) {
+  return containerById(id)?.name ?? id.slice(0, 12)
+}
+function colorFor(id: string) {
+  const i = streams.value.findIndex(s => s.id === id)
+  return PALETTE[(i < 0 ? 0 : i) % PALETTE.length]
+}
+
+function addStream(id: string) {
+  // reassign: shallowRef only reacts to .value replacement, not in-place push
+  streams.value = [...streams.value, useLogStream(id)]
+}
+function removeStream(id: string) {
+  const s = streams.value.find(s => s.id === id)
+  if (!s)
+    return
+  s.close()
+  streams.value = streams.value.filter(x => x.id !== id)
+}
+function closeAllStreams() {
+  streams.value.forEach(s => s.close())
+  streams.value = []
+}
+
+function select(c: ContainerInfo, ev: MouseEvent) {
+  const additive = ev.metaKey || ev.ctrlKey
+  if (additive) {
+    isSelected(c.id) ? removeStream(c.id) : addStream(c.id)
+  }
+  else {
+    if (streams.value.length === 1 && streams.value[0].id === c.id)
+      return
+    closeAllStreams()
+    addStream(c.id)
+  }
+  syncStats()
+}
+function isSelected(id: string) {
+  return streams.value.some(s => s.id === id)
+}
+
+function openStats(id: string) {
+  statsSource?.close()
+  statsSource = new EventSource(`/api/containers/${id}/stats`)
+  statsSource.onmessage = (e) => {
+    const s = JSON.parse(e.data) as StatsSample
+    stats.value = s
+    cpuHistory.value.push(s.cpu_pct)
+    memHistory.value.push(s.mem_pct)
+    if (cpuHistory.value.length > STATS_POINTS)
+      cpuHistory.value.shift()
+    if (memHistory.value.length > STATS_POINTS)
+      memHistory.value.shift()
+  }
+}
+function closeStats() {
+  statsSource?.close()
+  statsSource = null
+}
+// stats are single-container; only stream them when exactly one is selected
+function syncStats() {
+  closeStats()
+  stats.value = null
+  cpuHistory.value = []
+  memHistory.value = []
+  if (streams.value.length === 1)
+    openStats(streams.value[0].id)
+}
+
+function startResize(e: PointerEvent) {
+  e.preventDefault()
+  resizing.value = true
+  const onMove = (ev: PointerEvent) => {
+    sidebarWidth.value = `${Math.min(560, Math.max(200, ev.clientX))}px`
+  }
+  const onUp = () => {
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    document.body.style.userSelect = ''
+    resizing.value = false
+  }
+  document.body.style.userSelect = 'none'
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp)
+}
+
+async function loadContainers() {
+  try {
+    const res = await fetch('/api/containers')
+    if (!res.ok)
+      throw new Error(`HTTP ${res.status}`)
+    containers.value = await res.json()
+    listError.value = ''
+  }
+  catch (e) {
+    listError.value = e instanceof Error ? e.message : 'failed to load containers'
+  }
+}
+
+// --- shareable URL: ?c=name1,name2&view=split <-> selection + view mode ---
+let urlReady = false
+
+function applyUrl() {
+  if (!containers.value.length)
+    return
+  const names = String(route.query.c ?? '').split(',').filter(Boolean)
+  const ids = names
+    .map(n => containers.value.find(c => c.name === n)?.id)
+    .filter((x): x is string => !!x)
+  const current = streams.value.map(s => s.id)
+  const same = ids.length === current.length && ids.every((id, i) => id === current[i])
+  if (!same) {
+    closeAllStreams()
+    ids.forEach(addStream)
+    syncStats()
+  }
+  const v = route.query.view
+  if (v === 'split' || v === 'merged')
+    viewMode.value = v
+  urlReady = true
+}
+
+function syncToUrl() {
+  if (!urlReady)
+    return
+  const names = streams.value
+    .map(s => containerById(s.id)?.name)
+    .filter((n): n is string => !!n)
+  const query: Record<string, string> = {}
+  if (names.length)
+    query.c = names.join(',')
+  if (streams.value.length > 1)
+    query.view = viewMode.value
+  const cur: Record<string, string> = {}
+  if (typeof route.query.c === 'string')
+    cur.c = route.query.c
+  if (typeof route.query.view === 'string')
+    cur.view = route.query.view
+  if (JSON.stringify(query) !== JSON.stringify(cur))
+    router.replace({ query }).catch(() => {})
+}
+
+watch(() => containers.value.length, applyUrl)
+watch(() => route.query, applyUrl)
+watch([() => streams.value.map(s => s.id).join(','), viewMode], syncToUrl)
+
+useIntervalFn(loadContainers, 5000, { immediateCallback: true })
+onBeforeUnmount(() => {
+  closeAllStreams()
+  closeStats()
+})
+</script>
+
+<template>
+  <SidebarProvider
+    :width="sidebarWidth"
+    class="h-screen"
+    :class="{ '[&_[data-slot=sidebar]_div]:transition-none!': resizing }"
+  >
+    <AppSidebar
+      :containers="containers"
+      :list-error="listError"
+      :selected-ids="selectedIds"
+      @select="select"
+    />
+
+    <div
+      class="w-1 shrink-0 cursor-col-resize bg-border/40 transition-colors hover:bg-primary/60 peer-data-[state=collapsed]:hidden"
+      @pointerdown="startResize"
+    />
+
+    <main class="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
+      <div class="flex min-h-13 items-center gap-3 border-b px-3 py-2">
+        <SidebarTrigger class="-ml-1 size-7 shrink-0 text-muted-foreground [&_svg]:size-4" />
+        <template v-if="single">
+          <span class="font-medium">{{ single.name }}</span>
+          <Badge :variant="isRunning(single) ? 'default' : 'secondary'">
+            {{ single.status }}
+          </Badge>
+          <span v-if="streams[0].conn.value === 'error'" class="flex items-center gap-1 text-xs text-red-400">
+            <span class="size-1.5 animate-pulse rounded-full bg-red-500" />reconnecting
+          </span>
+          <span v-else-if="streams[0].conn.value === 'connecting'" class="text-xs text-muted-foreground">connecting</span>
+          <span class="ml-auto truncate text-xs text-muted-foreground">{{ single.image }}</span>
+        </template>
+        <template v-else-if="streams.length">
+          <div class="flex flex-wrap items-center gap-1.5">
+            <span
+              v-for="s in streams"
+              :key="s.id"
+              class="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs"
+              :style="{ color: colorFor(s.id), backgroundColor: `${colorFor(s.id)}1a` }"
+            >
+              <span v-if="s.conn.value === 'error'" class="size-1.5 animate-pulse rounded-full bg-current" />
+              <span class="max-w-40 truncate">{{ shortName(s.id) }}</span>
+              <button class="opacity-50 hover:opacity-100" @click="removeStream(s.id); syncStats()">✕</button>
+            </span>
+          </div>
+          <div class="ml-auto flex shrink-0 overflow-hidden rounded-md border text-xs">
+            <button
+              class="flex items-center gap-1.5 px-2 py-1 transition-colors"
+              :class="viewMode === 'merged' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50'"
+              title="Merged timeline"
+              @click="viewMode = 'merged'"
+            >
+              <Rows3 :size="13" />merged
+            </button>
+            <button
+              class="flex items-center gap-1.5 border-l px-2 py-1 transition-colors"
+              :class="viewMode === 'split' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50'"
+              title="Side-by-side panes"
+              @click="viewMode = 'split'"
+            >
+              <Columns2 :size="13" />split
+            </button>
+          </div>
+        </template>
+      </div>
+
+      <template v-if="streams.length">
+        <StatsBar v-if="single" :stats="stats" :cpu="cpuHistory" :mem="memHistory" />
+
+        <div class="flex items-center gap-1.5 border-b px-2 py-1.5">
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <button
+                class="flex size-8 shrink-0 items-center justify-center rounded-md border transition-colors"
+                :class="logRegex ? 'border-primary/40 bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50'"
+                @click="logRegex = !logRegex"
+              >
+                <Regex :size="14" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{{ logRegex ? 'Regex matching on' : 'Regex matching off' }}</TooltipContent>
+          </Tooltip>
+          <input
+            v-model="logFilter"
+            :placeholder="logRegex ? 'Filter logs (regex):  err\\d+   level=warn|error' : 'Filter logs:  level=error   user.id=123   free text'"
+            class="h-8 min-w-0 flex-1 rounded-md border bg-transparent px-3 font-mono text-xs outline-none focus-visible:ring-1"
+            :class="filterValid ? 'focus-visible:ring-ring' : 'border-red-500/60 focus-visible:ring-red-500'"
+          >
+        </div>
+
+        <LogPane
+          v-if="single || viewMode === 'merged'"
+          :entries="merged"
+          :filter="logFilter"
+          :regex="logRegex"
+          :show-source="streams.length > 1"
+          :source-name="shortName"
+          :source-color="colorFor"
+        />
+        <ResizablePanelGroup v-else direction="horizontal" auto-save-id="peekr.split" class="min-h-0 flex-1">
+          <template v-for="(s, i) in streams" :key="s.id">
+            <ResizableHandle v-if="i > 0" with-handle />
+            <ResizablePanel :id="s.id" :order="i" :min-size="10" class="flex min-w-0 flex-col">
+              <div class="flex items-center gap-1.5 border-b px-3 py-1.5 text-xs">
+                <span class="size-2 shrink-0 rounded-full" :style="{ backgroundColor: colorFor(s.id) }" />
+                <span class="truncate font-medium">{{ shortName(s.id) }}</span>
+                <span v-if="s.conn.value === 'error'" class="ml-auto size-1.5 shrink-0 animate-pulse rounded-full bg-red-500" />
+              </div>
+              <LogPane :entries="s.entries.value" :filter="logFilter" :regex="logRegex" />
+            </ResizablePanel>
+          </template>
+        </ResizablePanelGroup>
+      </template>
+
+      <div v-else class="flex flex-1 flex-col items-center justify-center gap-1 text-sm text-muted-foreground">
+        <span>Select a container to stream logs</span>
+        <span class="text-xs">⌘/Ctrl-click to merge several</span>
+      </div>
+    </main>
+  </SidebarProvider>
+</template>
