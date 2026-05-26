@@ -1,0 +1,100 @@
+# Log-emitter fixtures for peekr dev + integration tests.
+# Up:   docker compose -f fixtures/compose.yaml up -d
+# Down: docker compose -f fixtures/compose.yaml down
+# Integration tests (server/tests) expect these running; they key off the
+# com.peekr.fixture label and the peekr-fx-* names.
+#
+# NOTE: shell `$` is doubled to `$$` so Compose does not interpolate it.
+
+name: peekr-fixtures
+
+x-fixture: &fixture
+  image: alpine:latest
+  restart: unless-stopped
+  labels:
+    com.peekr.fixture: "true"
+
+services:
+  # pino/bunyan-style structured JSON: mixed string + numeric levels, nested fields.
+  json:
+    <<: *fixture
+    container_name: peekr-fx-json
+    command:
+      - sh
+      - -c
+      - |
+        i=0
+        levels="info debug info warn info error"
+        while true; do
+          i=$$((i+1))
+          lvl=$$(echo $$levels | tr ' ' '\n' | sed -n "$$(( (i % 6) + 1 ))p")
+          ts=$$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+          echo "{\"level\":\"$$lvl\",\"time\":\"$$ts\",\"msg\":\"handled request #$$i\",\"method\":\"GET\",\"path\":\"/api/items/$$i\",\"status\":200,\"latency_ms\":$$((i % 90 + 5)),\"user\":{\"id\":$$((i % 5 + 1)),\"name\":\"u$$((i % 5 + 1))\"},\"ok\":true}"
+          if [ $$((i % 7)) -eq 0 ]; then
+            echo "{\"level\":50,\"time\":\"$$ts\",\"msg\":\"db query timeout\",\"err\":\"context deadline exceeded\",\"retry\":3,\"query\":\"SELECT * FROM items\"}"
+          fi
+          sleep 0.5
+        done
+
+  # Unstructured plain text.
+  plain:
+    <<: *fixture
+    container_name: peekr-fx-plain
+    command:
+      - sh
+      - -c
+      - |
+        i=0
+        while true; do
+          i=$$((i+1))
+          echo "$$(date -u +%T) worker tick $$i - processing batch, nothing structured here"
+          sleep 0.8
+        done
+
+  # Writes to stderr (peekr should tag stream=stderr and colour it).
+  stderr:
+    <<: *fixture
+    container_name: peekr-fx-stderr
+    command:
+      - sh
+      - -c
+      - |
+        i=0
+        while true; do
+          i=$$((i+1))
+          echo "stderr diagnostic line $$i: connection reset, will retry" >&2
+          sleep 1
+        done
+
+  # Single write with embedded newlines -> one Docker frame, multiple lines.
+  multiline:
+    <<: *fixture
+    container_name: peekr-fx-multiline
+    command:
+      - sh
+      - -c
+      - |
+        i=0
+        while true; do
+          i=$$((i+1))
+          printf '%s\n' "ERROR unhandled exception (event $$i)" "  at handler (server.js:42)" "  at dispatch (router.js:17)" "  at main (index.js:3)"
+          sleep 1.5
+        done
+
+  # High volume to eyeball the 2000-line cap and scroll stickiness.
+  burst:
+    <<: *fixture
+    container_name: peekr-fx-burst
+    command:
+      - sh
+      - -c
+      - |
+        i=0
+        while true; do
+          n=0
+          while [ $$n -lt 40 ]; do
+            i=$$((i+1)); n=$$((n+1))
+            echo "burst $$i payload=$$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+          done
+          sleep 2
+        done
