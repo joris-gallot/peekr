@@ -15,8 +15,9 @@ async fn main() -> anyhow::Result<()> {
   };
   let app = build_app(state);
 
-  let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
-  info!("peekr listening on http://0.0.0.0:8080");
+  let addr = std::env::var("PEEKR_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".into());
+  let listener = tokio::net::TcpListener::bind(&addr).await?;
+  info!("peekr listening on http://{addr}");
   axum::serve(listener, app).await?;
   Ok(())
 }

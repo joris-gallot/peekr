@@ -55,13 +55,18 @@ pub async fn connect_docker() -> anyhow::Result<Docker> {
 }
 
 pub fn build_app(state: AppState) -> Router {
-  Router::new()
+  let app = Router::new()
     .route("/api/healthz", get(healthz))
     .route("/api/containers", get(list_containers))
     .route("/api/containers/{id}/logs", get(stream_logs))
     .route("/api/containers/{id}/stats", get(stream_stats))
     .layer(CorsLayer::permissive())
-    .with_state(state)
+    .with_state(state);
+
+  #[cfg(feature = "embed-ui")]
+  let app = app.fallback(ui::static_handler);
+
+  app
 }
 
 async fn healthz() -> &'static str {
@@ -269,5 +274,39 @@ mod tests {
   #[test]
   fn cpu_percent_treats_zero_cores_as_one() {
     assert_eq!(cpu_percent(200, 100, 2000, 1000, 0), 10.0);
+  }
+}
+
+#[cfg(feature = "embed-ui")]
+mod ui {
+  use axum::body::Body;
+  use axum::http::{StatusCode, Uri, header};
+  use axum::response::{IntoResponse, Response};
+  use rust_embed::Embed;
+
+  #[derive(Embed)]
+  #[folder = "../web/dist"]
+  struct Assets;
+
+  /// Serve an embedded asset, falling back to index.html so SPA routes resolve.
+  pub async fn static_handler(uri: Uri) -> Response {
+    let path = uri.path().trim_start_matches('/');
+    let path = if path.is_empty() { "index.html" } else { path };
+
+    if let Some(file) = Assets::get(path) {
+      let mime = mime_guess::from_path(path).first_or_octet_stream();
+      return Response::builder()
+        .header(header::CONTENT_TYPE, mime.as_ref())
+        .body(Body::from(file.data.into_owned()))
+        .unwrap();
+    }
+
+    match Assets::get("index.html") {
+      Some(file) => Response::builder()
+        .header(header::CONTENT_TYPE, "text/html")
+        .body(Body::from(file.data.into_owned()))
+        .unwrap(),
+      None => StatusCode::NOT_FOUND.into_response(),
+    }
   }
 }
