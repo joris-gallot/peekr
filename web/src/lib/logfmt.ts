@@ -93,10 +93,11 @@ export function parseFilter(query: string): FilterTerm[] {
     .split(/\s+/)
     .filter(Boolean)
     .map((token) => {
+      // keep original case: substring lower-cases at compare, regex uses the `i` flag
       const eq = token.indexOf('=')
       if (eq > 0)
-        return { path: token.slice(0, eq), value: token.slice(eq + 1).toLowerCase() }
-      return { path: null, value: token.toLowerCase() }
+        return { path: token.slice(0, eq), value: token.slice(eq + 1) }
+      return { path: null, value: token }
     })
 }
 
@@ -110,17 +111,69 @@ function getPath(obj: Record<string, unknown>, path: string): unknown {
 
 export function matchesFilter(log: ParsedLog, terms: FilterTerm[]): boolean {
   return terms.every((term) => {
+    const needle = term.value.toLowerCase()
     if (term.path) {
       if (term.path === 'level')
-        return (log.level ?? '').includes(term.value)
+        return (log.level ?? '').includes(needle)
       if (!log.json)
         return false
       const v = getPath(log.json, term.path)
       if (v == null)
         return false
-      return String(v).toLowerCase().includes(term.value)
+      return String(v).toLowerCase().includes(needle)
     }
-    return log.raw.toLowerCase().includes(term.value)
+    return log.raw.toLowerCase().includes(needle)
+  })
+}
+
+type LogPredicate = (log: ParsedLog) => boolean
+
+/**
+ * Build a reusable predicate from a filter query. Regexes are compiled once
+ * (not per line); an invalid pattern matches nothing so the field highlights.
+ */
+export function compileFilter(query: string, regex: boolean): LogPredicate {
+  const terms = parseFilter(query)
+  if (!terms.length)
+    return () => true
+  if (!regex)
+    return log => matchesFilter(log, terms)
+
+  const compiled = terms.map((t) => {
+    try {
+      return { path: t.path, re: new RegExp(t.value, 'i') as RegExp | null }
+    }
+    catch {
+      return { path: t.path, re: null }
+    }
+  })
+  return log => compiled.every((t) => {
+    if (!t.re)
+      return false
+    if (t.path) {
+      if (t.path === 'level')
+        return t.re.test(log.level ?? '')
+      if (!log.json)
+        return false
+      const v = getPath(log.json, t.path)
+      return v != null && t.re.test(String(v))
+    }
+    return t.re.test(log.raw)
+  })
+}
+
+/** Whether every regex term compiles (used to flag an invalid pattern in the UI). */
+export function isFilterValid(query: string, regex: boolean): boolean {
+  if (!regex)
+    return true
+  return parseFilter(query).every((t) => {
+    try {
+      void new RegExp(t.value)
+      return true
+    }
+    catch {
+      return false
+    }
   })
 }
 

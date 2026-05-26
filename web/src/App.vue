@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { LogStream } from '@/composables/useLogStream'
 import type { ContainerInfo, StatsSample } from '@/types'
-import { Columns2, Rows3 } from '@lucide/vue'
+import { Columns2, Regex, Rows3 } from '@lucide/vue'
 import { useIntervalFn, useLocalStorage } from '@vueuse/core'
 import { computed, onBeforeUnmount, ref, shallowRef } from 'vue'
 import AppSidebar from '@/components/AppSidebar.vue'
@@ -10,7 +10,9 @@ import StatsBar from '@/components/StatsBar.vue'
 import { Badge } from '@/components/ui/badge'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useLogStream } from '@/composables/useLogStream'
+import { isFilterValid } from '@/lib/logfmt'
 import { mergeByTime } from '@/lib/merge'
 import { isRunning } from '@/types'
 
@@ -20,6 +22,8 @@ const PALETTE = ['#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#f472b6', '#fb923c
 const containers = ref<ContainerInfo[]>([])
 const listError = ref('')
 const logFilter = ref('')
+const logRegex = useLocalStorage('peekr.logRegex', false)
+const filterValid = computed(() => isFilterValid(logFilter.value, logRegex.value))
 const streams = shallowRef<LogStream[]>([])
 const viewMode = useLocalStorage<'merged' | 'split'>('peekr.viewMode', 'merged')
 
@@ -215,11 +219,24 @@ onBeforeUnmount(() => {
       <template v-if="streams.length">
         <StatsBar v-if="single" :stats="stats" :cpu="cpuHistory" :mem="memHistory" />
 
-        <div class="border-b px-2 py-1.5">
+        <div class="flex items-center gap-1.5 border-b px-2 py-1.5">
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <button
+                class="flex size-8 shrink-0 items-center justify-center rounded-md border transition-colors"
+                :class="logRegex ? 'border-primary/40 bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50'"
+                @click="logRegex = !logRegex"
+              >
+                <Regex :size="14" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{{ logRegex ? 'Regex matching on' : 'Regex matching off' }}</TooltipContent>
+          </Tooltip>
           <input
             v-model="logFilter"
-            placeholder="Filter logs:  level=error   user.id=123   free text"
-            class="h-8 w-full rounded-md border bg-transparent px-3 font-mono text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            :placeholder="logRegex ? 'Filter logs (regex):  err\\d+   level=warn|error' : 'Filter logs:  level=error   user.id=123   free text'"
+            class="h-8 min-w-0 flex-1 rounded-md border bg-transparent px-3 font-mono text-xs outline-none focus-visible:ring-1"
+            :class="filterValid ? 'focus-visible:ring-ring' : 'border-red-500/60 focus-visible:ring-red-500'"
           >
         </div>
 
@@ -227,6 +244,7 @@ onBeforeUnmount(() => {
           v-if="single || viewMode === 'merged'"
           :entries="merged"
           :filter="logFilter"
+          :regex="logRegex"
           :show-source="streams.length > 1"
           :source-name="shortName"
           :source-color="colorFor"
@@ -240,7 +258,7 @@ onBeforeUnmount(() => {
                 <span class="truncate font-medium">{{ shortName(s.id) }}</span>
                 <span v-if="s.conn.value === 'error'" class="ml-auto size-1.5 shrink-0 animate-pulse rounded-full bg-red-500" />
               </div>
-              <LogPane :entries="s.entries.value" :filter="logFilter" />
+              <LogPane :entries="s.entries.value" :filter="logFilter" :regex="logRegex" />
             </ResizablePanel>
           </template>
         </ResizablePanelGroup>

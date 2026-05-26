@@ -3,16 +3,18 @@ import type { Entry } from '@/composables/useLogStream'
 import type { JsonValueKind, LogLevel } from '@/lib/logfmt'
 import { useScroll } from '@vueuse/core'
 import { computed, nextTick, ref, watch } from 'vue'
-import { displayValue, formatTime, matchesFilter, parseFilter, valueKind } from '@/lib/logfmt'
+import { compileFilter, displayValue, formatTime, valueKind } from '@/lib/logfmt'
 
 const props = withDefaults(defineProps<{
   entries: Entry[]
   filter?: string
+  regex?: boolean
   showSource?: boolean
   sourceName?: (cid: string) => string
   sourceColor?: (cid: string) => string
 }>(), {
   filter: '',
+  regex: false,
   showSource: false,
 })
 
@@ -45,8 +47,10 @@ const pane = ref<HTMLElement | null>(null)
 const { arrivedState } = useScroll(pane, { offset: { bottom: 40 } })
 
 const visible = computed(() => {
-  const terms = parseFilter(props.filter)
-  return terms.length ? props.entries.filter(e => matchesFilter(e.log, terms)) : props.entries
+  if (!props.filter.trim())
+    return props.entries
+  const predicate = compileFilter(props.filter, props.regex)
+  return props.entries.filter(e => predicate(e.log))
 })
 
 watch(() => visible.value.length, () => {

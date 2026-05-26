@@ -1,9 +1,10 @@
 import type { ParsedLog } from './logfmt'
 import { describe, expect, it } from 'vitest'
 import {
+  compileFilter,
   formatTime,
+  isFilterValid,
   matchesFilter,
-
   parseFilter,
   parseLog,
   valueKind,
@@ -98,6 +99,50 @@ describe('matchesFilter', () => {
   it('does not match field paths on plain logs', () => {
     const plain: ParsedLog = parseLog('plain line')
     expect(matchesFilter(plain, parseFilter('user.id=1'))).toBe(false)
+  })
+})
+
+describe('compileFilter (regex)', () => {
+  const log = parseLog('{"level":"error","msg":"db timeout after 500ms","user":{"id":123}}')
+
+  it('matches a regex against the raw line', () => {
+    expect(compileFilter('timeout|panic', true)(log)).toBe(true)
+    expect(compileFilter('\\d+ms', true)(log)).toBe(true)
+    expect(compileFilter('^never', true)(log)).toBe(false)
+  })
+
+  it('matches a regex against a field path', () => {
+    expect(compileFilter('user.id=^12', true)(log)).toBe(true)
+    expect(compileFilter('level=err', true)(log)).toBe(true)
+    expect(compileFilter('user.id=^99', true)(log)).toBe(false)
+  })
+
+  it('is case-insensitive', () => {
+    expect(compileFilter('TIMEOUT', true)(log)).toBe(true)
+  })
+
+  it('matches nothing on an invalid pattern', () => {
+    expect(compileFilter('(unclosed', true)(log)).toBe(false)
+  })
+
+  it('falls back to substring when regex is off', () => {
+    expect(compileFilter('timeout|panic', false)(log)).toBe(false)
+    expect(compileFilter('timeout', false)(log)).toBe(true)
+  })
+
+  it('matches everything on empty query', () => {
+    expect(compileFilter('', true)(log)).toBe(true)
+  })
+})
+
+describe('isFilterValid', () => {
+  it('is always valid when regex is off', () => {
+    expect(isFilterValid('(unclosed', false)).toBe(true)
+  })
+  it('flags invalid regex patterns', () => {
+    expect(isFilterValid('valid.*', true)).toBe(true)
+    expect(isFilterValid('(unclosed', true)).toBe(false)
+    expect(isFilterValid('user.id=[0-9]+', true)).toBe(true)
   })
 })
 
