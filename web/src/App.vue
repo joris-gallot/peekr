@@ -29,6 +29,7 @@ const memHistory = ref<number[]>([])
 const STATS_POINTS = 60
 
 const sidebarWidth = useLocalStorage('peekr.sidebarWidth', '16rem')
+const resizing = ref(false)
 
 let statsSource: EventSource | null = null
 
@@ -110,6 +111,7 @@ function syncStats() {
 
 function startResize(e: PointerEvent) {
   e.preventDefault()
+  resizing.value = true
   const onMove = (ev: PointerEvent) => {
     sidebarWidth.value = `${Math.min(560, Math.max(200, ev.clientX))}px`
   }
@@ -117,6 +119,7 @@ function startResize(e: PointerEvent) {
     window.removeEventListener('pointermove', onMove)
     window.removeEventListener('pointerup', onUp)
     document.body.style.userSelect = ''
+    resizing.value = false
   }
   document.body.style.userSelect = 'none'
   window.addEventListener('pointermove', onMove)
@@ -144,7 +147,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <SidebarProvider :width="sidebarWidth" class="h-screen">
+  <SidebarProvider
+    :width="sidebarWidth"
+    class="h-screen"
+    :class="{ '[&_[data-slot=sidebar]_div]:transition-none!': resizing }"
+  >
     <AppSidebar
       :containers="containers"
       :list-error="listError"
