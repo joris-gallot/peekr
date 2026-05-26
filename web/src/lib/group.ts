@@ -33,3 +33,20 @@ export function groupContainers<T extends Groupable>(list: T[]): ContainerGroup<
   })
   return groups
 }
+
+/** Split out pinned items (by name), ordered to match the `pins` list. */
+export function partitionPinned<T extends { name: string }>(
+  list: T[],
+  pins: string[],
+): { pinned: T[], rest: T[] } {
+  const pinSet = new Set(pins)
+  const pinned: T[] = []
+  const rest: T[] = []
+  for (const item of list) {
+    if (pinSet.has(item.name))
+      pinned.push(item)
+    else rest.push(item)
+  }
+  pinned.sort((a, b) => pins.indexOf(a.name) - pins.indexOf(b.name))
+  return { pinned, rest }
+}

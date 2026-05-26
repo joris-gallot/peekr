@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import type { ContainerInfo } from '@/types'
-import { useLocalStorage } from '@vueuse/core'
+import { Moon, Pin, Sun } from '@lucide/vue'
+import { useDark, useLocalStorage, useToggle } from '@vueuse/core'
 import { computed, ref } from 'vue'
+import ContainerRow from '@/components/ContainerRow.vue'
 import { Badge } from '@/components/ui/badge'
 import {
   Collapsible,
@@ -12,6 +14,7 @@ import { Input } from '@/components/ui/input'
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -20,8 +23,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from '@/components/ui/sidebar'
-import { groupContainers } from '@/lib/group'
-import { isRunning } from '@/types'
+import { groupContainers, partitionPinned } from '@/lib/group'
 
 const props = defineProps<{
   containers: ContainerInfo[]
@@ -35,16 +37,27 @@ const emit = defineEmits<{
 
 const filter = ref('')
 const openGroups = useLocalStorage<Record<string, boolean>>('peekr.openGroups', {})
+const pins = useLocalStorage<string[]>('peekr.pins', [])
+
+const isDark = useDark({ initialValue: 'dark' })
+const toggleDark = useToggle(isDark)
 
 const filterActive = computed(() => filter.value.trim().length > 0)
-const groups = computed(() =>
-  groupContainers(
-    props.containers.filter(c => c.name.toLowerCase().includes(filter.value.toLowerCase())),
-  ),
+const filtered = computed(() =>
+  props.containers.filter(c => c.name.toLowerCase().includes(filter.value.toLowerCase())),
 )
+const partition = computed(() => partitionPinned(filtered.value, pins.value))
+const pinned = computed(() => partition.value.pinned)
+const groups = computed(() => groupContainers(partition.value.rest))
 
 function isSelected(id: string) {
   return props.selectedIds.includes(id)
+}
+function isPinned(name: string) {
+  return pins.value.includes(name)
+}
+function togglePin(name: string) {
+  pins.value = isPinned(name) ? pins.value.filter(n => n !== name) : [...pins.value, name]
 }
 // the unprojected bucket has an empty project; store its state under a readable key
 function groupKey(project: string) {
@@ -75,6 +88,25 @@ function setGroupOpen(project: string, open: boolean) {
         {{ listError }}
       </p>
 
+      <SidebarGroup v-if="pinned.length" class="py-1">
+        <SidebarGroupLabel class="gap-1.5">
+          <Pin class="size-3 fill-current" />pinned
+        </SidebarGroupLabel>
+        <SidebarGroupContent>
+          <SidebarMenu>
+            <ContainerRow
+              v-for="c in pinned"
+              :key="c.id"
+              :container="c"
+              :active="isSelected(c.id)"
+              :pinned="true"
+              @select="emit('select', c, $event)"
+              @toggle-pin="togglePin(c.name)"
+            />
+          </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
+
       <Collapsible
         v-for="g in groups"
         :key="g.project"
@@ -95,24 +127,36 @@ function setGroupOpen(project: string, open: boolean) {
           <CollapsibleContent>
             <SidebarGroupContent>
               <SidebarMenu>
-                <SidebarMenuItem v-for="c in g.items" :key="c.id">
-                  <SidebarMenuButton :is-active="isSelected(c.id)" @click="emit('select', c, $event)">
-                    <span
-                      class="size-2 shrink-0 rounded-full"
-                      :class="isRunning(c) ? 'bg-green-500' : 'bg-muted-foreground'"
-                    />
-                    <span class="truncate">{{ c.name }}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
+                <ContainerRow
+                  v-for="c in g.items"
+                  :key="c.id"
+                  :container="c"
+                  :active="isSelected(c.id)"
+                  :pinned="false"
+                  @select="emit('select', c, $event)"
+                  @toggle-pin="togglePin(c.name)"
+                />
               </SidebarMenu>
             </SidebarGroupContent>
           </CollapsibleContent>
         </SidebarGroup>
       </Collapsible>
 
-      <p v-if="!groups.length && !listError" class="px-3 py-4 text-center text-xs text-muted-foreground">
+      <p v-if="!groups.length && !pinned.length && !listError" class="px-3 py-4 text-center text-xs text-muted-foreground">
         No containers
       </p>
     </SidebarContent>
+
+    <SidebarFooter class="border-t">
+      <SidebarMenu>
+        <SidebarMenuItem>
+          <SidebarMenuButton class="text-muted-foreground" @click="toggleDark()">
+            <Sun v-if="isDark" />
+            <Moon v-else />
+            <span>{{ isDark ? 'Light mode' : 'Dark mode' }}</span>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      </SidebarMenu>
+    </SidebarFooter>
   </Sidebar>
 </template>
