@@ -8,6 +8,7 @@ import AppSidebar from '@/components/AppSidebar.vue'
 import LogPane from '@/components/LogPane.vue'
 import StatsBar from '@/components/StatsBar.vue'
 import { Badge } from '@/components/ui/badge'
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { useLogStream } from '@/composables/useLogStream'
 import { mergeByTime } from '@/lib/merge'
@@ -223,20 +224,19 @@ onBeforeUnmount(() => {
           :source-name="shortName"
           :source-color="colorFor"
         />
-        <div v-else class="flex min-h-0 flex-1">
-          <div
-            v-for="s in streams"
-            :key="s.id"
-            class="flex min-w-0 flex-1 flex-col border-l first:border-l-0"
-          >
-            <div class="flex items-center gap-1.5 border-b px-3 py-1.5 text-xs">
-              <span class="size-2 shrink-0 rounded-full" :style="{ backgroundColor: colorFor(s.id) }" />
-              <span class="truncate font-medium">{{ shortName(s.id) }}</span>
-              <span v-if="s.conn.value === 'error'" class="ml-auto size-1.5 shrink-0 animate-pulse rounded-full bg-red-500" />
-            </div>
-            <LogPane :entries="s.entries.value" :filter="logFilter" />
-          </div>
-        </div>
+        <ResizablePanelGroup v-else direction="horizontal" auto-save-id="peekr.split" class="min-h-0 flex-1">
+          <template v-for="(s, i) in streams" :key="s.id">
+            <ResizableHandle v-if="i > 0" with-handle />
+            <ResizablePanel :id="s.id" :order="i" :min-size="10" class="flex min-w-0 flex-col">
+              <div class="flex items-center gap-1.5 border-b px-3 py-1.5 text-xs">
+                <span class="size-2 shrink-0 rounded-full" :style="{ backgroundColor: colorFor(s.id) }" />
+                <span class="truncate font-medium">{{ shortName(s.id) }}</span>
+                <span v-if="s.conn.value === 'error'" class="ml-auto size-1.5 shrink-0 animate-pulse rounded-full bg-red-500" />
+              </div>
+              <LogPane :entries="s.entries.value" :filter="logFilter" />
+            </ResizablePanel>
+          </template>
+        </ResizablePanelGroup>
       </template>
 
       <div v-else class="flex flex-1 flex-col items-center justify-center gap-1 text-sm text-muted-foreground">
