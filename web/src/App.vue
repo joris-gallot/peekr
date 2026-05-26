@@ -1,8 +1,25 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { ScrollArea } from '@/components/ui/scroll-area'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+} from '@/components/ui/sidebar'
+import { groupContainers } from '@/lib/group'
 import {
   type JsonValueKind,
   type LogLevel,
@@ -21,6 +38,7 @@ interface ContainerInfo {
   image: string
   state: string
   status: string
+  project: string
 }
 
 interface LogLine {
@@ -72,15 +90,28 @@ const logFilter = ref('')
 const conn = ref<ConnState>('idle')
 const logPane = ref<HTMLElement | null>(null)
 
+const sidebarWidth = ref(localStorage.getItem('peekr.sidebarWidth') || '16rem')
+const openGroups = reactive<Record<string, boolean>>(loadOpenGroups())
+
 let source: EventSource | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let listTimer: ReturnType<typeof setInterval> | null = null
 let lastTs: string | null = null
 let stick = true
 
+function loadOpenGroups(): Record<string, boolean> {
+  try {
+    return JSON.parse(localStorage.getItem('peekr.openGroups') || '{}')
+  } catch {
+    return {}
+  }
+}
+
 const filteredContainers = computed(() =>
   containers.value.filter((c) => c.name.toLowerCase().includes(filter.value.toLowerCase())),
 )
+const filterActive = computed(() => filter.value.trim().length > 0)
+const groups = computed(() => groupContainers(filteredContainers.value))
 
 const visibleLogs = computed(() => {
   const terms = parseFilter(logFilter.value)
@@ -88,8 +119,18 @@ const visibleLogs = computed(() => {
   return entries.value.filter((e) => matchesFilter(e.log, terms))
 })
 
+watch(openGroups, (v) => localStorage.setItem('peekr.openGroups', JSON.stringify(v)))
+
 function isRunning(c: ContainerInfo) {
   return c.state.toLowerCase().includes('running')
+}
+
+function isGroupOpen(project: string) {
+  return filterActive.value ? true : openGroups[project] !== false
+}
+
+function setGroupOpen(project: string, open: boolean) {
+  openGroups[project] = open
 }
 
 function chipClass(level: LogLevel | null) {
@@ -105,6 +146,22 @@ function accentClass(e: Entry) {
 function msgClass(e: Entry) {
   if (e.stream === 'stderr' && !e.log.level) return 'text-red-300'
   return 'text-foreground/90'
+}
+
+function startResize(e: PointerEvent) {
+  e.preventDefault()
+  const onMove = (ev: PointerEvent) => {
+    sidebarWidth.value = `${Math.min(560, Math.max(200, ev.clientX))}px`
+  }
+  const onUp = () => {
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    document.body.style.userSelect = ''
+    localStorage.setItem('peekr.sidebarWidth', sidebarWidth.value)
+  }
+  document.body.style.userSelect = 'none'
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp)
 }
 
 async function loadContainers() {
@@ -193,42 +250,66 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="flex h-screen bg-background text-foreground">
-    <aside class="flex w-72 flex-col border-r">
-      <div class="flex items-center gap-2 border-b px-4 py-3">
-        <span class="text-lg font-semibold tracking-tight">peekr</span>
-        <Badge variant="secondary" class="ml-auto">{{ containers.length }}</Badge>
-      </div>
-      <div class="p-2">
+  <SidebarProvider :width="sidebarWidth" class="h-screen">
+    <Sidebar collapsible="none" class="border-r">
+      <SidebarHeader class="gap-2 border-b">
+        <div class="flex items-center gap-2">
+          <span class="text-lg font-semibold tracking-tight">peekr</span>
+          <Badge variant="secondary" class="ml-auto">{{ containers.length }}</Badge>
+        </div>
         <Input v-model="filter" placeholder="Filter containers..." class="h-8" />
-      </div>
-      <p v-if="listError" class="px-3 pb-2 text-xs text-red-500">{{ listError }}</p>
-      <ScrollArea class="flex-1">
-        <nav class="flex flex-col gap-0.5 p-2">
-          <button
-            v-for="c in filteredContainers"
-            :key="c.id"
-            class="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent"
-            :class="{ 'bg-accent': selected?.id === c.id }"
-            @click="select(c)"
-          >
-            <span
-              class="size-2 shrink-0 rounded-full"
-              :class="isRunning(c) ? 'bg-green-500' : 'bg-muted-foreground'"
-            />
-            <span class="truncate">{{ c.name }}</span>
-          </button>
-          <p
-            v-if="!filteredContainers.length && !listError"
-            class="px-2 py-4 text-center text-xs text-muted-foreground"
-          >
-            No containers
-          </p>
-        </nav>
-      </ScrollArea>
-    </aside>
+      </SidebarHeader>
 
-    <main class="flex flex-1 flex-col overflow-hidden">
+      <SidebarContent class="gap-0">
+        <p v-if="listError" class="px-3 py-2 text-xs text-red-500">{{ listError }}</p>
+
+        <Collapsible
+          v-for="g in groups"
+          :key="g.project"
+          :open="isGroupOpen(g.project)"
+          @update:open="setGroupOpen(g.project, $event)"
+        >
+          <SidebarGroup class="py-1">
+            <SidebarGroupLabel as-child>
+              <CollapsibleTrigger class="flex w-full items-center gap-1.5 hover:text-foreground">
+                <span
+                  class="text-muted-foreground/50 transition-transform duration-150"
+                  :class="isGroupOpen(g.project) ? 'rotate-90' : ''"
+                >▸</span>
+                <span class="truncate">{{ g.project || 'ungrouped' }}</span>
+                <span class="ml-auto tabular-nums text-muted-foreground/60">{{ g.items.length }}</span>
+              </CollapsibleTrigger>
+            </SidebarGroupLabel>
+            <CollapsibleContent>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  <SidebarMenuItem v-for="c in g.items" :key="c.id">
+                    <SidebarMenuButton :is-active="selected?.id === c.id" @click="select(c)">
+                      <span
+                        class="size-2 shrink-0 rounded-full"
+                        :class="isRunning(c) ? 'bg-green-500' : 'bg-muted-foreground'"
+                      />
+                      <span class="truncate">{{ c.name }}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </CollapsibleContent>
+          </SidebarGroup>
+        </Collapsible>
+
+        <p v-if="!groups.length && !listError" class="px-3 py-4 text-center text-xs text-muted-foreground">
+          No containers
+        </p>
+      </SidebarContent>
+    </Sidebar>
+
+    <div
+      class="w-1 shrink-0 cursor-col-resize bg-border/40 transition-colors hover:bg-primary/60"
+      @pointerdown="startResize"
+    />
+
+    <main class="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
       <template v-if="selected">
         <header class="flex items-center gap-3 border-b px-4 py-3">
           <span class="font-medium">{{ selected.name }}</span>
@@ -293,21 +374,15 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <p
-            v-if="!visibleLogs.length && entries.length"
-            class="px-3 py-4 text-muted-foreground"
-          >
+          <p v-if="!visibleLogs.length && entries.length" class="px-3 py-4 text-muted-foreground">
             No lines match filter
           </p>
         </div>
       </template>
 
-      <div
-        v-else
-        class="flex flex-1 items-center justify-center text-sm text-muted-foreground"
-      >
+      <div v-else class="flex flex-1 items-center justify-center text-sm text-muted-foreground">
         Select a container to stream logs
       </div>
     </main>
-  </div>
+  </SidebarProvider>
 </template>

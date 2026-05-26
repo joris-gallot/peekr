@@ -28,6 +28,8 @@ pub struct ContainerInfo {
   pub image: String,
   pub state: String,
   pub status: String,
+  /// docker compose project, empty for standalone containers
+  pub project: String,
 }
 
 #[derive(Deserialize)]
@@ -85,6 +87,10 @@ async fn list_containers(
       image: c.image.unwrap_or_default(),
       state: c.state.map(|s| format!("{s:?}")).unwrap_or_default(),
       status: c.status.unwrap_or_default(),
+      project: c
+        .labels
+        .and_then(|l| l.get("com.docker.compose.project").cloned())
+        .unwrap_or_default(),
     })
     .collect();
 
