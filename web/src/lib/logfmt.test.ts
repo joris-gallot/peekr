@@ -28,6 +28,10 @@ describe('parseLog', () => {
     expect(parseLog('{"severity":"critical","msg":"x"}').level).toBe('fatal')
   })
 
+  it('maps numeric levels passed as strings', () => {
+    expect(parseLog('{"level":"50","msg":"x"}').level).toBe('error')
+  })
+
   it('falls back to the raw line for the message when no msg key', () => {
     const log = parseLog('{"foo":"bar"}')
     expect(log.json).not.toBeNull()

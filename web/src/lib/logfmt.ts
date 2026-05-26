@@ -11,8 +11,7 @@ export interface ParsedLog {
 const LEVEL_KEYS = ['level', 'lvl', 'severity', 'levelname', 'loglevel']
 const MSG_KEYS = ['msg', 'message', 'text', 'log']
 
-// pino/bunyan numeric levels
-const NUMERIC: Record<number, LogLevel> = {
+const PINO_LEVELS: Record<number, LogLevel> = {
   10: 'trace',
   20: 'debug',
   30: 'info',
@@ -38,12 +37,12 @@ const STRING_ALIASES: Record<string, LogLevel> = {
 }
 
 function normalizeLevel(v: unknown): LogLevel | null {
-  if (typeof v === 'number') return NUMERIC[v] ?? null
+  if (typeof v === 'number') return PINO_LEVELS[v] ?? null
   if (typeof v === 'string') {
     const s = v.trim().toLowerCase()
     if (s in STRING_ALIASES) return STRING_ALIASES[s]
     const n = Number(s)
-    if (!Number.isNaN(n) && n in NUMERIC) return NUMERIC[n]
+    if (!Number.isNaN(n) && n in PINO_LEVELS) return PINO_LEVELS[n]
   }
   return null
 }
