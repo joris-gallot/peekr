@@ -1,5 +1,6 @@
 use std::convert::Infallible;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::{
   Json, Router,
@@ -10,7 +11,9 @@ use axum::{
 };
 use bollard::Docker;
 use bollard::container::LogOutput;
-use bollard::query_parameters::{ListContainersOptionsBuilder, LogsOptionsBuilder};
+use bollard::query_parameters::{
+  ListContainersOptionsBuilder, LogsOptionsBuilder, StatsOptionsBuilder,
+};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio_stream::Stream;
@@ -56,6 +59,7 @@ pub fn build_app(state: AppState) -> Router {
     .route("/api/healthz", get(healthz))
     .route("/api/containers", get(list_containers))
     .route("/api/containers/{id}/logs", get(stream_logs))
+    .route("/api/containers/{id}/stats", get(stream_stats))
     .layer(CorsLayer::permissive())
     .with_state(state)
 }
@@ -158,5 +162,112 @@ fn split_ts(line: &str) -> (Option<String>, String) {
       (Some(ts.to_string()), rest.to_string())
     }
     _ => (None, line.to_string()),
+  }
+}
+
+#[derive(Serialize)]
+struct StatsSample {
+  ts: u64,
+  cpu_pct: f64,
+  mem_used: u64,
+  mem_limit: u64,
+  mem_pct: f64,
+}
+
+async fn stream_stats(
+  Path(id): Path<String>,
+  State(state): State<AppState>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+  let opts = StatsOptionsBuilder::default().stream(true).build();
+
+  let stream = state
+    .docker
+    .stats(&id, Some(opts))
+    .filter_map(|res| async move {
+      let s = res.ok()?;
+      let cpu = s.cpu_stats?;
+      let precpu = s.precpu_stats?;
+      let cpu_pct = cpu_percent(
+        cpu
+          .cpu_usage
+          .as_ref()
+          .and_then(|u| u.total_usage)
+          .unwrap_or(0),
+        precpu
+          .cpu_usage
+          .as_ref()
+          .and_then(|u| u.total_usage)
+          .unwrap_or(0),
+        cpu.system_cpu_usage.unwrap_or(0),
+        precpu.system_cpu_usage.unwrap_or(0),
+        cpu.online_cpus.unwrap_or(1),
+      );
+
+      let mem = s.memory_stats?;
+      let usage = mem.usage.unwrap_or(0);
+      // docker subtracts reclaimable page cache from usage to match `docker stats`
+      let cache = mem
+        .stats
+        .as_ref()
+        .and_then(|m| m.get("inactive_file").or_else(|| m.get("cache")).copied())
+        .unwrap_or(0);
+      let mem_used = usage.saturating_sub(cache);
+      let mem_limit = mem.limit.unwrap_or(0);
+      let mem_pct = if mem_limit > 0 {
+        mem_used as f64 / mem_limit as f64 * 100.0
+      } else {
+        0.0
+      };
+
+      let sample = StatsSample {
+        ts: now_ms(),
+        cpu_pct,
+        mem_used,
+        mem_limit,
+        mem_pct,
+      };
+      Some(Ok(Event::default().json_data(sample).ok()?))
+    });
+
+  Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+/// Docker's CPU-usage formula: share of total host CPU time scaled by core count.
+fn cpu_percent(cpu_total: u64, precpu_total: u64, system: u64, presystem: u64, online: u32) -> f64 {
+  let cpu_delta = cpu_total.saturating_sub(precpu_total) as f64;
+  let sys_delta = system.saturating_sub(presystem) as f64;
+  if sys_delta > 0.0 && cpu_delta > 0.0 {
+    (cpu_delta / sys_delta) * online.max(1) as f64 * 100.0
+  } else {
+    0.0
+  }
+}
+
+fn now_ms() -> u64 {
+  SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .map(|d| d.as_millis() as u64)
+    .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::cpu_percent;
+
+  #[test]
+  fn cpu_percent_scales_by_cores() {
+    // 10% of one core's delta, across 4 cores -> 40%
+    assert_eq!(cpu_percent(200, 100, 2000, 1000, 4), 40.0);
+  }
+
+  #[test]
+  fn cpu_percent_zero_when_no_delta() {
+    assert_eq!(cpu_percent(100, 100, 2000, 1000, 4), 0.0);
+    assert_eq!(cpu_percent(200, 100, 1000, 1000, 4), 0.0);
+  }
+
+  #[test]
+  fn cpu_percent_treats_zero_cores_as_one() {
+    assert_eq!(cpu_percent(200, 100, 2000, 1000, 0), 10.0);
   }
 }
