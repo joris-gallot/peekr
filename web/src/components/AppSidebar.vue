@@ -46,11 +46,15 @@ const groups = computed(() =>
 function isSelected(id: string) {
   return props.selectedIds.includes(id)
 }
+// the unprojected bucket has an empty project; store its state under a readable key
+function groupKey(project: string) {
+  return project || 'ungrouped'
+}
 function isGroupOpen(project: string) {
-  return filterActive.value ? true : openGroups.value[project] !== false
+  return filterActive.value ? true : openGroups.value[groupKey(project)] !== false
 }
 function setGroupOpen(project: string, open: boolean) {
-  openGroups.value[project] = open
+  openGroups.value[groupKey(project)] = open
 }
 </script>
 
