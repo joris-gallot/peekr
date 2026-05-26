@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: pnpm/action-setup@v6.0.8
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v6.4.0
+        with:
+          node-version-file: web/.node-version
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo build --workspace
+      - run: cargo test --workspace
+      # integration tests drive the real Docker daemon (present on the runner)
+      - name: Start fixtures
+        run: docker compose -f fixtures/compose.yaml up -d
+      - run: cargo test -p peekr-server -- --ignored
+      - name: Stop fixtures
+        if: always()
+        run: docker compose -f fixtures/compose.yaml down
