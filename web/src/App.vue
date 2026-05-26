@@ -2,7 +2,8 @@
 import type { LogStream } from '@/composables/useLogStream'
 import type { ContainerInfo, StatsSample } from '@/types'
 import { Columns2, Rows3 } from '@lucide/vue'
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { useIntervalFn, useLocalStorage } from '@vueuse/core'
+import { computed, onBeforeUnmount, ref, shallowRef } from 'vue'
 import AppSidebar from '@/components/AppSidebar.vue'
 import LogPane from '@/components/LogPane.vue'
 import StatsBar from '@/components/StatsBar.vue'
@@ -19,17 +20,16 @@ const containers = ref<ContainerInfo[]>([])
 const listError = ref('')
 const logFilter = ref('')
 const streams = shallowRef<LogStream[]>([])
-const viewMode = ref<'merged' | 'split'>((localStorage.getItem('peekr.viewMode') as 'merged' | 'split') || 'merged')
+const viewMode = useLocalStorage<'merged' | 'split'>('peekr.viewMode', 'merged')
 
 const stats = ref<StatsSample | null>(null)
 const cpuHistory = ref<number[]>([])
 const memHistory = ref<number[]>([])
 const STATS_POINTS = 60
 
-const sidebarWidth = ref(localStorage.getItem('peekr.sidebarWidth') || '16rem')
+const sidebarWidth = useLocalStorage('peekr.sidebarWidth', '16rem')
 
 let statsSource: EventSource | null = null
-let listTimer: ReturnType<typeof setInterval> | null = null
 
 const selectedIds = computed(() => streams.value.map(s => s.id))
 const single = computed(() => (streams.value.length === 1 ? containerById(streams.value[0].id) : null))
@@ -44,11 +44,6 @@ function shortName(id: string) {
 function colorFor(id: string) {
   const i = streams.value.findIndex(s => s.id === id)
   return PALETTE[(i < 0 ? 0 : i) % PALETTE.length]
-}
-
-function setView(mode: 'merged' | 'split') {
-  viewMode.value = mode
-  localStorage.setItem('peekr.viewMode', mode)
 }
 
 function addStream(id: string) {
@@ -121,7 +116,6 @@ function startResize(e: PointerEvent) {
     window.removeEventListener('pointermove', onMove)
     window.removeEventListener('pointerup', onUp)
     document.body.style.userSelect = ''
-    localStorage.setItem('peekr.sidebarWidth', sidebarWidth.value)
   }
   document.body.style.userSelect = 'none'
   window.addEventListener('pointermove', onMove)
@@ -141,15 +135,10 @@ async function loadContainers() {
   }
 }
 
-onMounted(() => {
-  loadContainers()
-  listTimer = setInterval(loadContainers, 5000)
-})
+useIntervalFn(loadContainers, 5000, { immediateCallback: true })
 onBeforeUnmount(() => {
   closeAllStreams()
   closeStats()
-  if (listTimer)
-    clearInterval(listTimer)
 })
 </script>
 
@@ -199,7 +188,7 @@ onBeforeUnmount(() => {
               class="flex items-center gap-1.5 px-2 py-1 transition-colors"
               :class="viewMode === 'merged' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50'"
               title="Merged timeline"
-              @click="setView('merged')"
+              @click="viewMode = 'merged'"
             >
               <Rows3 :size="13" />merged
             </button>
@@ -207,7 +196,7 @@ onBeforeUnmount(() => {
               class="flex items-center gap-1.5 border-l px-2 py-1 transition-colors"
               :class="viewMode === 'split' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50'"
               title="Side-by-side panes"
-              @click="setView('split')"
+              @click="viewMode = 'split'"
             >
               <Columns2 :size="13" />split
             </button>

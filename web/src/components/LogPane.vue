@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Entry } from '@/composables/useLogStream'
 import type { JsonValueKind, LogLevel } from '@/lib/logfmt'
+import { useScroll } from '@vueuse/core'
 import { computed, nextTick, ref, watch } from 'vue'
 import { displayValue, formatTime, matchesFilter, parseFilter, valueKind } from '@/lib/logfmt'
 
@@ -40,7 +41,8 @@ const KIND_CLASS: Record<JsonValueKind, string> = {
 }
 
 const pane = ref<HTMLElement | null>(null)
-let stick = true
+// arrivedState.bottom stays true until the user scrolls up, so it doubles as the stick flag
+const { arrivedState } = useScroll(pane, { offset: { bottom: 40 } })
 
 const visible = computed(() => {
   const terms = parseFilter(props.filter)
@@ -48,7 +50,7 @@ const visible = computed(() => {
 })
 
 watch(() => visible.value.length, () => {
-  if (stick) {
+  if (arrivedState.bottom) {
     nextTick(() => {
       const el = pane.value
       if (el)
@@ -56,13 +58,6 @@ watch(() => visible.value.length, () => {
     })
   }
 })
-
-function onScroll() {
-  const el = pane.value
-  if (!el)
-    return
-  stick = el.scrollHeight - el.scrollTop - el.clientHeight < 40
-}
 
 function chipClass(level: LogLevel | null) {
   return level ? LEVEL_CHIP[level] : ''
@@ -89,7 +84,6 @@ function toggle(e: Entry) {
   <div
     ref="pane"
     class="flex-1 overflow-auto py-1 font-mono text-xs leading-relaxed"
-    @scroll="onScroll"
   >
     <div v-for="(e, i) in visible" :key="i">
       <div

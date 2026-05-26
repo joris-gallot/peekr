@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ContainerInfo } from '@/types'
-import { computed, reactive, ref, watch } from 'vue'
+import { useLocalStorage } from '@vueuse/core'
+import { computed, ref } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import {
   Collapsible,
@@ -33,17 +34,7 @@ const emit = defineEmits<{
 }>()
 
 const filter = ref('')
-const openGroups = reactive<Record<string, boolean>>(loadOpenGroups())
-
-function loadOpenGroups(): Record<string, boolean> {
-  try {
-    return JSON.parse(localStorage.getItem('peekr.openGroups') || '{}')
-  }
-  catch {
-    return {}
-  }
-}
-watch(openGroups, v => localStorage.setItem('peekr.openGroups', JSON.stringify(v)))
+const openGroups = useLocalStorage<Record<string, boolean>>('peekr.openGroups', {})
 
 const filterActive = computed(() => filter.value.trim().length > 0)
 const groups = computed(() =>
@@ -56,10 +47,10 @@ function isSelected(id: string) {
   return props.selectedIds.includes(id)
 }
 function isGroupOpen(project: string) {
-  return filterActive.value ? true : openGroups[project] !== false
+  return filterActive.value ? true : openGroups.value[project] !== false
 }
 function setGroupOpen(project: string, open: boolean) {
-  openGroups[project] = open
+  openGroups.value[project] = open
 }
 </script>
 
