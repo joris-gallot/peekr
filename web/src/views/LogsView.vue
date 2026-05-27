@@ -23,6 +23,8 @@ const PALETTE = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ec4899', '#f97316
 const route = useRoute()
 const router = useRouter()
 
+// single host for now ('local' = the hub's own docker); host switcher comes with agents
+const host = 'local'
 const containers = ref<ContainerInfo[]>([])
 const listError = ref('')
 const logFilter = ref('')
@@ -58,7 +60,7 @@ function colorFor(id: string) {
 
 function addStream(id: string) {
   // reassign: shallowRef only reacts to .value replacement, not in-place push
-  streams.value = [...streams.value, useLogStream(id)]
+  streams.value = [...streams.value, useLogStream(host, id)]
 }
 function removeStream(id: string) {
   const s = streams.value.find(s => s.id === id)
@@ -91,7 +93,7 @@ function isSelected(id: string) {
 
 function openStats(id: string) {
   statsSource?.close()
-  statsSource = new EventSource(`/api/containers/${id}/stats`)
+  statsSource = new EventSource(`/api/hosts/${host}/containers/${id}/stats`)
   statsSource.onmessage = (e) => {
     const s = JSON.parse(e.data) as StatsSample
     stats.value = s
@@ -136,7 +138,7 @@ function startResize(e: PointerEvent) {
 
 async function loadContainers() {
   try {
-    const res = await fetch('/api/containers')
+    const res = await fetch(`/api/hosts/${host}/containers`)
     if (!res.ok)
       throw new Error(`HTTP ${res.status}`)
     containers.value = await res.json()

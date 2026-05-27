@@ -29,7 +29,7 @@ export interface LogStream {
 // global so interleaved streams keep a stable arrival order across containers
 let SEQ = 0
 
-export function useLogStream(id: string, cap = 2000): LogStream {
+export function useLogStream(host: string, id: string, cap = 2000): LogStream {
   const entries = ref<Entry[]>([])
   const conn = ref<ConnState>('connecting')
   let source: EventSource | null = null
@@ -41,7 +41,8 @@ export function useLogStream(id: string, cap = 2000): LogStream {
     conn.value = 'connecting'
     // `since` resumes after a drop instead of re-dumping the tail (avoids dup lines)
     const since = lastTs ? Math.floor(Date.parse(lastTs) / 1000) : null
-    const url = since ? `/api/containers/${id}/logs?since=${since}` : `/api/containers/${id}/logs`
+    const base = `/api/hosts/${host}/containers/${id}/logs`
+    const url = since ? `${base}?since=${since}` : base
 
     source = new EventSource(url)
     source.onopen = () => (conn.value = 'open')

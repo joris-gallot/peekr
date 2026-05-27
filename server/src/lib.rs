@@ -62,11 +62,12 @@ pub async fn connect_docker() -> anyhow::Result<Docker> {
 }
 
 pub fn build_app(state: AppState) -> Router {
-  // docker routes require a valid session cookie
+  // docker routes require a valid session cookie; scoped per host (local + future agents)
   let protected = Router::new()
-    .route("/api/containers", get(list_containers))
-    .route("/api/containers/{id}/logs", get(stream_logs))
-    .route("/api/containers/{id}/stats", get(stream_stats))
+    .route("/api/hosts", get(list_hosts))
+    .route("/api/hosts/{host}/containers", get(list_containers))
+    .route("/api/hosts/{host}/containers/{id}/logs", get(stream_logs))
+    .route("/api/hosts/{host}/containers/{id}/stats", get(stream_stats))
     .layer(from_fn_with_state(state.clone(), auth::require_auth));
 
   let public = Router::new()
@@ -92,9 +93,37 @@ async fn healthz() -> &'static str {
   "ok"
 }
 
+const LOCAL_HOST: &str = "local";
+
+#[derive(Serialize)]
+pub struct HostInfo {
+  pub id: String,
+  pub name: String,
+  pub status: &'static str,
+}
+
+async fn list_hosts() -> Json<Vec<HostInfo>> {
+  // only the hub's own docker for now; agents join here in v2
+  Json(vec![HostInfo {
+    id: LOCAL_HOST.to_string(),
+    name: std::env::var("PEEKR_HOST_NAME").unwrap_or_else(|_| LOCAL_HOST.to_string()),
+    status: "online",
+  }])
+}
+
+fn check_host(host: &str) -> Result<(), StatusCode> {
+  if host == LOCAL_HOST {
+    Ok(())
+  } else {
+    Err(StatusCode::NOT_FOUND)
+  }
+}
+
 async fn list_containers(
+  Path(host): Path<String>,
   State(state): State<AppState>,
 ) -> Result<Json<Vec<ContainerInfo>>, (StatusCode, String)> {
+  check_host(&host).map_err(|s| (s, "unknown host".into()))?;
   let opts = ListContainersOptionsBuilder::default().all(true).build();
   let containers = state
     .docker
@@ -126,10 +155,11 @@ async fn list_containers(
 }
 
 async fn stream_logs(
-  Path(id): Path<String>,
+  Path((host, id)): Path<(String, String)>,
   Query(q): Query<LogQuery>,
   State(state): State<AppState>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, StatusCode> {
+  check_host(&host)?;
   let mut builder = LogsOptionsBuilder::default()
     .stdout(true)
     .stderr(true)
@@ -176,7 +206,7 @@ async fn stream_logs(
     tokio_stream::iter(events)
   });
 
-  Sse::new(stream).keep_alive(KeepAlive::default())
+  Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
 /// Docker prefixes each line with an RFC3339 timestamp when `timestamps(true)`.
@@ -199,9 +229,10 @@ struct StatsSample {
 }
 
 async fn stream_stats(
-  Path(id): Path<String>,
+  Path((host, id)): Path<(String, String)>,
   State(state): State<AppState>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, StatusCode> {
+  check_host(&host)?;
   let opts = StatsOptionsBuilder::default().stream(true).build();
 
   let stream = state
@@ -253,7 +284,7 @@ async fn stream_stats(
       Some(Ok(Event::default().json_data(sample).ok()?))
     });
 
-  Sse::new(stream).keep_alive(KeepAlive::default())
+  Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
 /// Docker's CPU-usage formula: share of total host CPU time scaled by core count.

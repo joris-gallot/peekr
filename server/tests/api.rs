@@ -64,7 +64,7 @@ async fn authed(base: &str) -> reqwest::Client {
 
 async fn fetch_containers(base: &str, client: &reqwest::Client) -> Vec<ContainerInfo> {
   client
-    .get(format!("{base}/api/containers"))
+    .get(format!("{base}/api/hosts/local/containers"))
     .send()
     .await
     .unwrap()
@@ -113,7 +113,7 @@ async fn auth_flow() {
 
   // protected route is 401 before auth
   let r = client
-    .get(format!("{base}/api/containers"))
+    .get(format!("{base}/api/hosts/local/containers"))
     .send()
     .await
     .unwrap();
@@ -140,7 +140,7 @@ async fn auth_flow() {
   );
   assert!(
     client
-      .get(format!("{base}/api/containers"))
+      .get(format!("{base}/api/hosts/local/containers"))
       .send()
       .await
       .unwrap()
@@ -188,7 +188,7 @@ async fn streams_structured_log_lines() {
     .expect("peekr-fx-json fixture must be running");
 
   let resp = client
-    .get(format!("{base}/api/containers/{}/logs", fx.id))
+    .get(format!("{base}/api/hosts/local/containers/{}/logs", fx.id))
     .send()
     .await
     .unwrap();
@@ -227,7 +227,7 @@ async fn streams_stats_samples() {
     .expect("peekr-fx-burst fixture must be running");
 
   let resp = client
-    .get(format!("{base}/api/containers/{}/stats", fx.id))
+    .get(format!("{base}/api/hosts/local/containers/{}/stats", fx.id))
     .send()
     .await
     .unwrap();
@@ -266,7 +266,7 @@ async fn accepts_since_query() {
     .as_secs();
   let resp = client
     .get(format!(
-      "{base}/api/containers/{}/logs?since={since}",
+      "{base}/api/hosts/local/containers/{}/logs?since={since}",
       fx.id
     ))
     .send()
