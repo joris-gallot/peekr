@@ -5,6 +5,7 @@ import { useColorMode, useLocalStorage } from '@vueuse/core'
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import ContainerRow from '@/components/ContainerRow.vue'
+import HostSwitcher from '@/components/HostSwitcher.vue'
 import {
   Collapsible,
   CollapsibleContent,
@@ -117,6 +118,7 @@ function setGroupOpen(project: string, open: boolean) {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      <HostSwitcher />
       <Input v-model="filter" placeholder="Filter containers..." class="h-8" />
     </SidebarHeader>
 

@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { useHosts } from '@/composables/useHosts'
 import { useLogStream } from '@/composables/useLogStream'
 import { isFilterValid } from '@/lib/logfmt'
 import { mergeByTime } from '@/lib/merge'
@@ -23,8 +24,7 @@ const PALETTE = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ec4899', '#f97316
 const route = useRoute()
 const router = useRouter()
 
-// single host for now ('local' = the hub's own docker); host switcher comes with agents
-const host = 'local'
+const { activeHost, refresh: refreshHosts } = useHosts()
 const containers = ref<ContainerInfo[]>([])
 const listError = ref('')
 const logFilter = ref('')
@@ -60,7 +60,7 @@ function colorFor(id: string) {
 
 function addStream(id: string) {
   // reassign: shallowRef only reacts to .value replacement, not in-place push
-  streams.value = [...streams.value, useLogStream(host, id)]
+  streams.value = [...streams.value, useLogStream(activeHost.value, id)]
 }
 function removeStream(id: string) {
   const s = streams.value.find(s => s.id === id)
@@ -93,7 +93,7 @@ function isSelected(id: string) {
 
 function openStats(id: string) {
   statsSource?.close()
-  statsSource = new EventSource(`/api/hosts/${host}/containers/${id}/stats`)
+  statsSource = new EventSource(`/api/hosts/${activeHost.value}/containers/${id}/stats`)
   statsSource.onmessage = (e) => {
     const s = JSON.parse(e.data) as StatsSample
     stats.value = s
@@ -138,7 +138,7 @@ function startResize(e: PointerEvent) {
 
 async function loadContainers() {
   try {
-    const res = await fetch(`/api/hosts/${host}/containers`)
+    const res = await fetch(`/api/hosts/${activeHost.value}/containers`)
     if (!res.ok)
       throw new Error(`HTTP ${res.status}`)
     containers.value = await res.json()
@@ -153,6 +153,12 @@ async function loadContainers() {
 let urlReady = false
 
 function applyUrl() {
+  // host first: if it differs, switch and let the activeHost watcher reload, then re-run
+  const h = (route.query.host as string) || 'local'
+  if (h !== activeHost.value) {
+    activeHost.value = h
+    return
+  }
   if (!containers.value.length)
     return
   const names = String(route.query.c ?? '').split(',').filter(Boolean)
@@ -179,11 +185,15 @@ function syncToUrl() {
     .map(s => containerById(s.id)?.name)
     .filter((n): n is string => !!n)
   const query: Record<string, string> = {}
+  if (activeHost.value !== 'local')
+    query.host = activeHost.value
   if (names.length)
     query.c = names.join(',')
   if (streams.value.length > 1)
     query.view = viewMode.value
   const cur: Record<string, string> = {}
+  if (typeof route.query.host === 'string')
+    cur.host = route.query.host
   if (typeof route.query.c === 'string')
     cur.c = route.query.c
   if (typeof route.query.view === 'string')
@@ -195,8 +205,17 @@ function syncToUrl() {
 watch(() => containers.value.length, applyUrl)
 watch(() => route.query, applyUrl)
 watch([() => streams.value.map(s => s.id).join(','), viewMode], syncToUrl)
+// switching host: drop streams/stats and reload that host's containers
+watch(activeHost, () => {
+  closeAllStreams()
+  syncStats()
+  loadContainers()
+})
 
-useIntervalFn(loadContainers, 5000, { immediateCallback: true })
+useIntervalFn(() => {
+  loadContainers()
+  refreshHosts()
+}, 5000, { immediateCallback: true })
 onBeforeUnmount(() => {
   closeAllStreams()
   closeStats()

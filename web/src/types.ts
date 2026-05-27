@@ -7,6 +7,12 @@ export interface ContainerInfo {
   project: string
 }
 
+export interface HostInfo {
+  id: string
+  name: string
+  status: string
+}
+
 export interface StatsSample {
   ts: number
   cpu_pct: number
