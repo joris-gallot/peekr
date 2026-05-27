@@ -36,6 +36,7 @@ async fn spawn() -> Option<String> {
     docker: Arc::new(docker),
     db: pool,
     secret: Arc::new(b"test-secret".to_vec()),
+    agents: Default::default(),
   };
   let app = build_app(state);
   let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

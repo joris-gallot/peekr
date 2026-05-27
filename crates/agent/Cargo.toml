@@ -1,0 +1,21 @@
+[package]
+name = "peekr-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "peekr-agent"
+path = "src/main.rs"
+
+[dependencies]
+peekr-common = { path = "../common" }
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+bollard = "0.21"
+serde_json = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"

@@ -8,7 +8,7 @@ use axum::{
   http::StatusCode,
   middleware::from_fn_with_state,
   response::sse::{Event, KeepAlive, Sse},
-  routing::{get, post},
+  routing::{delete, get, post},
 };
 use bollard::Docker;
 use bollard::container::LogOutput;
@@ -21,38 +21,24 @@ use sqlx::SqlitePool;
 use tokio_stream::Stream;
 use tower_http::cors::CorsLayer;
 
+pub mod agents;
 pub mod auth;
 pub mod db;
+
+pub use peekr_common::{ContainerInfo, LogLine, StatsSample};
 
 #[derive(Clone)]
 pub struct AppState {
   pub docker: Arc<Docker>,
   pub db: SqlitePool,
   pub secret: Arc<Vec<u8>>,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct ContainerInfo {
-  pub id: String,
-  pub name: String,
-  pub image: String,
-  pub state: String,
-  pub status: String,
-  /// docker compose project, empty for standalone containers
-  pub project: String,
+  pub agents: agents::AgentManager,
 }
 
 #[derive(Deserialize)]
 struct LogQuery {
   /// unix seconds; set on reconnect to resume instead of re-dumping the tail
   since: Option<i32>,
-}
-
-#[derive(Serialize)]
-struct LogLine {
-  ts: Option<String>,
-  stream: &'static str,
-  msg: String,
 }
 
 pub async fn connect_docker() -> anyhow::Result<Docker> {
@@ -64,7 +50,8 @@ pub async fn connect_docker() -> anyhow::Result<Docker> {
 pub fn build_app(state: AppState) -> Router {
   // docker routes require a valid session cookie; scoped per host (local + future agents)
   let protected = Router::new()
-    .route("/api/hosts", get(list_hosts))
+    .route("/api/hosts", get(list_hosts).post(add_host))
+    .route("/api/hosts/{host}", delete(remove_host))
     .route("/api/hosts/{host}/containers", get(list_containers))
     .route("/api/hosts/{host}/containers/{id}/logs", get(stream_logs))
     .route("/api/hosts/{host}/containers/{id}/stats", get(stream_stats))
@@ -72,6 +59,7 @@ pub fn build_app(state: AppState) -> Router {
 
   let public = Router::new()
     .route("/api/healthz", get(healthz))
+    .route("/api/agents/connect", get(agents::agent_connect))
     .route("/api/auth/first-run", get(auth::first_run))
     .route("/api/auth/signup", post(auth::signup))
     .route("/api/auth/login", post(auth::login))
@@ -102,13 +90,75 @@ pub struct HostInfo {
   pub status: &'static str,
 }
 
-async fn list_hosts() -> Json<Vec<HostInfo>> {
-  // only the hub's own docker for now; agents join here in v2
-  Json(vec![HostInfo {
+async fn list_hosts(State(state): State<AppState>) -> Json<Vec<HostInfo>> {
+  let online = state.agents.online_ids().await;
+  let mut hosts = vec![HostInfo {
     id: LOCAL_HOST.to_string(),
     name: std::env::var("PEEKR_HOST_NAME").unwrap_or_else(|_| LOCAL_HOST.to_string()),
     status: "online",
-  }])
+  }];
+  let rows: Vec<(String, String)> = sqlx::query_as("SELECT id, name FROM hosts ORDER BY name")
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+  for (id, name) in rows {
+    let status = if online.contains(&id) { "online" } else { "offline" };
+    hosts.push(HostInfo { id, name, status });
+  }
+  Json(hosts)
+}
+
+#[derive(Deserialize)]
+struct NewHost {
+  name: String,
+}
+
+#[derive(Serialize)]
+struct CreatedHost {
+  id: String,
+  name: String,
+  /// shown once so the agent can be configured; not retrievable later
+  token: String,
+}
+
+async fn add_host(
+  State(state): State<AppState>,
+  Json(body): Json<NewHost>,
+) -> Result<Json<CreatedHost>, (StatusCode, String)> {
+  if body.name.trim().is_empty() {
+    return Err((StatusCode::BAD_REQUEST, "name required".into()));
+  }
+  let id = rand_hex(6);
+  let token = rand_hex(24);
+  let created = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as i64;
+  sqlx::query("INSERT INTO hosts (id, name, token, created_at) VALUES (?, ?, ?, ?)")
+    .bind(&id)
+    .bind(&body.name)
+    .bind(&token)
+    .bind(created)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+  Ok(Json(CreatedHost { id, name: body.name, token }))
+}
+
+async fn remove_host(
+  Path(host): Path<String>,
+  State(state): State<AppState>,
+) -> Result<StatusCode, (StatusCode, String)> {
+  sqlx::query("DELETE FROM hosts WHERE id = ?")
+    .bind(&host)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+  Ok(StatusCode::NO_CONTENT)
+}
+
+fn rand_hex(bytes: usize) -> String {
+  use rand::RngCore;
+  let mut buf = vec![0u8; bytes];
+  rand::rng().fill_bytes(&mut buf);
+  buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn check_host(host: &str) -> Result<(), StatusCode> {
@@ -123,7 +173,9 @@ async fn list_containers(
   Path(host): Path<String>,
   State(state): State<AppState>,
 ) -> Result<Json<Vec<ContainerInfo>>, (StatusCode, String)> {
-  check_host(&host).map_err(|s| (s, "unknown host".into()))?;
+  if host != LOCAL_HOST {
+    return remote_list(&state, &host).await;
+  }
   let opts = ListContainersOptionsBuilder::default().all(true).build();
   let containers = state
     .docker
@@ -152,6 +204,22 @@ async fn list_containers(
     .collect();
 
   Ok(Json(infos))
+}
+
+async fn remote_list(
+  state: &AppState,
+  host: &str,
+) -> Result<Json<Vec<ContainerInfo>>, (StatusCode, String)> {
+  let (_, mut rx) = state
+    .agents
+    .request(host, peekr_common::Cmd::List)
+    .await
+    .ok_or((StatusCode::SERVICE_UNAVAILABLE, "host offline".into()))?;
+  match rx.recv().await {
+    Some(peekr_common::Resp::Containers(list)) => Ok(Json(list)),
+    Some(peekr_common::Resp::Error(e)) => Err((StatusCode::BAD_GATEWAY, e)),
+    _ => Err((StatusCode::BAD_GATEWAY, "no response from agent".into())),
+  }
 }
 
 async fn stream_logs(
@@ -188,7 +256,7 @@ async fn stream_logs(
             let (ts, msg) = split_ts(line);
             let payload = LogLine {
               ts,
-              stream: stream_name,
+              stream: stream_name.to_string(),
               msg,
             };
             Ok(
@@ -217,15 +285,6 @@ fn split_ts(line: &str) -> (Option<String>, String) {
     }
     _ => (None, line.to_string()),
   }
-}
-
-#[derive(Serialize)]
-struct StatsSample {
-  ts: u64,
-  cpu_pct: f64,
-  mem_used: u64,
-  mem_limit: u64,
-  mem_pct: f64,
 }
 
 async fn stream_stats(
@@ -335,7 +394,7 @@ mod ui {
   use rust_embed::Embed;
 
   #[derive(Embed)]
-  #[folder = "../web/dist"]
+  #[folder = "../../web/dist"]
   struct Assets;
 
   /// Serve an embedded asset, falling back to index.html so SPA routes resolve.

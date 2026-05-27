@@ -9,11 +9,11 @@ RUN pnpm install --frozen-lockfile
 COPY web/ ./
 RUN pnpm build
 
-# 2. Build the Rust binary with the frontend embedded (rust-embed reads ../web/dist).
+# 2. Build the Rust binary with the frontend embedded (rust-embed reads ../../web/dist).
 FROM rust:1-bookworm AS build
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
-COPY server ./server
+COPY crates ./crates
 COPY --from=web /app/web/dist ./web/dist
 RUN cargo build --release -p peekr-server --features embed-ui
 

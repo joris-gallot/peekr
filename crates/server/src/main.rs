@@ -19,6 +19,7 @@ async fn main() -> anyhow::Result<()> {
     docker: Arc::new(docker),
     db: pool,
     secret: Arc::new(load_secret()),
+    agents: Default::default(),
   };
   let app = build_app(state);
 
