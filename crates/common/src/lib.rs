@@ -41,8 +41,13 @@ pub struct ClientMsg {
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Cmd {
   List,
-  Logs { container: String, since: Option<i32> },
-  Stats { container: String },
+  Logs {
+    container: String,
+    since: Option<i32>,
+  },
+  Stats {
+    container: String,
+  },
   /// stop the stream started under this `id`
   Cancel,
 }

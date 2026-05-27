@@ -3,7 +3,10 @@ use sqlx::SqlitePool;
 use sqlx::sqlite::SqlitePoolOptions;
 
 pub async fn connect(url: &str) -> Result<SqlitePool> {
-  let pool = SqlitePoolOptions::new().max_connections(5).connect(url).await?;
+  let pool = SqlitePoolOptions::new()
+    .max_connections(5)
+    .connect(url)
+    .await?;
   init_schema(&pool).await?;
   Ok(pool)
 }

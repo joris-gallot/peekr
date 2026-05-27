@@ -1,4 +1,5 @@
 use std::convert::Infallible;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -7,7 +8,7 @@ use axum::{
   extract::{Path, Query, State},
   http::StatusCode,
   middleware::from_fn_with_state,
-  response::sse::{Event, KeepAlive, Sse},
+  response::sse::{Event, Sse},
   routing::{delete, get, post},
 };
 use bollard::Docker;
@@ -16,9 +17,11 @@ use bollard::query_parameters::{
   ListContainersOptionsBuilder, LogsOptionsBuilder, StatsOptionsBuilder,
 };
 use futures_util::StreamExt;
+use peekr_common::{Cmd, Resp};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use tokio_stream::Stream;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tower_http::cors::CorsLayer;
 
 pub mod agents;
@@ -26,6 +29,9 @@ pub mod auth;
 pub mod db;
 
 pub use peekr_common::{ContainerInfo, LogLine, StatsSample};
+
+/// Boxed so local (bollard) and remote (agent) branches share one return type.
+type EventStream = Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -102,7 +108,11 @@ async fn list_hosts(State(state): State<AppState>) -> Json<Vec<HostInfo>> {
     .await
     .unwrap_or_default();
   for (id, name) in rows {
-    let status = if online.contains(&id) { "online" } else { "offline" };
+    let status = if online.contains(&id) {
+      "online"
+    } else {
+      "offline"
+    };
     hosts.push(HostInfo { id, name, status });
   }
   Json(hosts)
@@ -130,7 +140,10 @@ async fn add_host(
   }
   let id = rand_hex(6);
   let token = rand_hex(24);
-  let created = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) as i64;
+  let created = SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .map(|d| d.as_secs())
+    .unwrap_or(0) as i64;
   sqlx::query("INSERT INTO hosts (id, name, token, created_at) VALUES (?, ?, ?, ?)")
     .bind(&id)
     .bind(&body.name)
@@ -139,7 +152,11 @@ async fn add_host(
     .execute(&state.db)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-  Ok(Json(CreatedHost { id, name: body.name, token }))
+  Ok(Json(CreatedHost {
+    id,
+    name: body.name,
+    token,
+  }))
 }
 
 async fn remove_host(
@@ -161,12 +178,45 @@ fn rand_hex(bytes: usize) -> String {
   buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn check_host(host: &str) -> Result<(), StatusCode> {
-  if host == LOCAL_HOST {
-    Ok(())
-  } else {
-    Err(StatusCode::NOT_FOUND)
+/// Cancels the agent stream when the client's SSE connection is dropped.
+struct CancelGuard {
+  agents: agents::AgentManager,
+  host: String,
+  id: u64,
+}
+
+impl Drop for CancelGuard {
+  fn drop(&mut self) {
+    let (agents, host, id) = (self.agents.clone(), self.host.clone(), self.id);
+    tokio::spawn(async move { agents.cancel(&host, id).await });
   }
+}
+
+/// Bridge an agent command's response frames to an SSE stream (logs / stats).
+async fn remote_stream(
+  agents: agents::AgentManager,
+  host: String,
+  cmd: Cmd,
+) -> Result<Sse<EventStream>, StatusCode> {
+  let (id, rx) = agents
+    .request(&host, cmd)
+    .await
+    .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+  let guard = CancelGuard { agents, host, id };
+  let stream = UnboundedReceiverStream::new(rx)
+    .filter_map(move |resp| {
+      let _ = &guard; // keep the cancel guard alive for the stream's lifetime
+      async move {
+        match resp {
+          Resp::Log(l) => Event::default().json_data(l).ok().map(Ok::<_, Infallible>),
+          Resp::Stat(s) => Event::default().json_data(s).ok().map(Ok::<_, Infallible>),
+          Resp::Error(e) => Some(Ok(Event::default().event("stream-error").data(e))),
+          _ => None,
+        }
+      }
+    })
+    .boxed();
+  Ok(Sse::new(stream))
 }
 
 async fn list_containers(
@@ -226,8 +276,18 @@ async fn stream_logs(
   Path((host, id)): Path<(String, String)>,
   Query(q): Query<LogQuery>,
   State(state): State<AppState>,
-) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, StatusCode> {
-  check_host(&host)?;
+) -> Result<Sse<EventStream>, StatusCode> {
+  if host != LOCAL_HOST {
+    return remote_stream(
+      state.agents.clone(),
+      host,
+      Cmd::Logs {
+        container: id,
+        since: q.since,
+      },
+    )
+    .await;
+  }
   let mut builder = LogsOptionsBuilder::default()
     .stdout(true)
     .stderr(true)
@@ -274,7 +334,7 @@ async fn stream_logs(
     tokio_stream::iter(events)
   });
 
-  Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+  Ok(Sse::new(stream.boxed()))
 }
 
 /// Docker prefixes each line with an RFC3339 timestamp when `timestamps(true)`.
@@ -290,8 +350,10 @@ fn split_ts(line: &str) -> (Option<String>, String) {
 async fn stream_stats(
   Path((host, id)): Path<(String, String)>,
   State(state): State<AppState>,
-) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, StatusCode> {
-  check_host(&host)?;
+) -> Result<Sse<EventStream>, StatusCode> {
+  if host != LOCAL_HOST {
+    return remote_stream(state.agents.clone(), host, Cmd::Stats { container: id }).await;
+  }
   let opts = StatsOptionsBuilder::default().stream(true).build();
 
   let stream = state
@@ -343,7 +405,7 @@ async fn stream_stats(
       Some(Ok(Event::default().json_data(sample).ok()?))
     });
 
-  Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+  Ok(Sse::new(stream.boxed()))
 }
 
 /// Docker's CPU-usage formula: share of total host CPU time scaled by core count.

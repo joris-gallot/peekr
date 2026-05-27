@@ -36,7 +36,11 @@ impl AgentManager {
   }
 
   /// Start a request; returns its id and a receiver of response frames.
-  pub async fn request(&self, host: &str, cmd: Cmd) -> Option<(u64, mpsc::UnboundedReceiver<Resp>)> {
+  pub async fn request(
+    &self,
+    host: &str,
+    cmd: Cmd,
+  ) -> Option<(u64, mpsc::UnboundedReceiver<Resp>)> {
     let conn = self.conns.lock().await.get(host)?.clone();
     let id = conn.counter.fetch_add(1, Ordering::Relaxed);
     let (tx, rx) = mpsc::unbounded_channel();
@@ -48,7 +52,10 @@ impl AgentManager {
   /// Tell the agent to stop the stream under `id` and drop its routing entry.
   pub async fn cancel(&self, host: &str, id: u64) {
     if let Some(conn) = self.conns.lock().await.get(host) {
-      let _ = conn.to_agent.send(ClientMsg { id, cmd: Cmd::Cancel });
+      let _ = conn.to_agent.send(ClientMsg {
+        id,
+        cmd: Cmd::Cancel,
+      });
       conn.pending.lock().await.remove(&id);
     }
   }
@@ -93,7 +100,9 @@ async fn handle_agent(socket: WebSocket, host_id: String, mgr: AgentManager) {
   // forward queued ClientMsgs to the socket
   let writer = tokio::spawn(async move {
     while let Some(msg) = outbox.recv().await {
-      let Ok(txt) = serde_json::to_string(&msg) else { continue };
+      let Ok(txt) = serde_json::to_string(&msg) else {
+        continue;
+      };
       if write.send(Message::Text(txt.into())).await.is_err() {
         break;
       }
@@ -103,7 +112,9 @@ async fn handle_agent(socket: WebSocket, host_id: String, mgr: AgentManager) {
   // route agent responses to the matching pending request
   while let Some(Ok(msg)) = read.next().await {
     if let Message::Text(t) = msg {
-      let Ok(am) = serde_json::from_str::<AgentMsg>(t.as_str()) else { continue };
+      let Ok(am) = serde_json::from_str::<AgentMsg>(t.as_str()) else {
+        continue;
+      };
       let sender = pending.lock().await.get(&am.id).cloned();
       if let Some(s) = sender {
         let done = matches!(am.resp, Resp::End | Resp::Error(_));
