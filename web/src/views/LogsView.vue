@@ -6,6 +6,7 @@ import { useIntervalFn, useLocalStorage } from '@vueuse/core'
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppSidebar from '@/components/AppSidebar.vue'
+import HostStats from '@/components/HostStats.vue'
 import LogPane from '@/components/LogPane.vue'
 import StatsBar from '@/components/StatsBar.vue'
 import { Badge } from '@/components/ui/badge'
@@ -336,9 +337,12 @@ onBeforeUnmount(() => {
         </ResizablePanelGroup>
       </template>
 
-      <div v-else class="flex flex-1 flex-col items-center justify-center gap-1 text-sm text-muted-foreground">
-        <span>Select a container to stream logs</span>
-        <span class="text-xs">⌘/Ctrl-click to merge several</span>
+      <div v-else class="flex min-h-0 flex-1 flex-col">
+        <HostStats :host="activeHost" />
+        <div class="flex flex-1 flex-col items-center justify-center gap-1 text-sm text-muted-foreground">
+          <span>Select a container to stream logs</span>
+          <span class="text-xs">⌘/Ctrl-click to merge several</span>
+        </div>
       </div>
     </main>
   </SidebarProvider>

@@ -58,6 +58,7 @@ pub fn build_app(state: AppState) -> Router {
   let protected = Router::new()
     .route("/api/hosts", get(list_hosts).post(add_host))
     .route("/api/hosts/{host}", delete(remove_host))
+    .route("/api/hosts/{host}/stats", get(host_stats))
     .route("/api/hosts/{host}/containers", get(list_containers))
     .route("/api/hosts/{host}/containers/{id}/logs", get(stream_logs))
     .route("/api/hosts/{host}/containers/{id}/stats", get(stream_stats))
@@ -210,11 +211,35 @@ async fn remote_stream(
         match resp {
           Resp::Log(l) => Event::default().json_data(l).ok().map(Ok::<_, Infallible>),
           Resp::Stat(s) => Event::default().json_data(s).ok().map(Ok::<_, Infallible>),
+          Resp::HostStat(s) => Event::default().json_data(s).ok().map(Ok::<_, Infallible>),
           Resp::Error(e) => Some(Ok(Event::default().event("stream-error").data(e))),
           _ => None,
         }
       }
     })
+    .boxed();
+  Ok(Sse::new(stream))
+}
+
+async fn host_stats(
+  Path(host): Path<String>,
+  State(state): State<AppState>,
+) -> Result<Sse<EventStream>, StatusCode> {
+  if host != LOCAL_HOST {
+    return remote_stream(state.agents.clone(), host, Cmd::HostStats).await;
+  }
+  let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<peekr_common::HostStat>();
+  tokio::spawn(async move {
+    let mut sampler = peekr_common::HostSampler::new();
+    loop {
+      tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+      if tx.send(sampler.sample()).is_err() {
+        break;
+      }
+    }
+  });
+  let stream = UnboundedReceiverStream::new(rx)
+    .filter_map(|st| async move { Event::default().json_data(st).ok().map(Ok::<_, Infallible>) })
     .boxed();
   Ok(Sse::new(stream))
 }

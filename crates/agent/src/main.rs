@@ -91,6 +91,7 @@ async fn handle(id: u64, cmd: Cmd, docker: Docker, out: Out, tasks: Tasks) {
     }
     Cmd::Logs { container, since } => stream_logs(id, &docker, &container, since, &out).await,
     Cmd::Stats { container } => stream_stats(id, &docker, &container, &out).await,
+    Cmd::HostStats => stream_host_stats(id, &out).await,
     Cmd::Cancel => {}
   }
   let _ = out.send(AgentMsg {
@@ -214,6 +215,22 @@ async fn stream_stats(id: u64, docker: &Docker, container: &str, out: &Out) {
       .send(AgentMsg {
         id,
         resp: Resp::Stat(sample),
+      })
+      .is_err()
+    {
+      return;
+    }
+  }
+}
+
+async fn stream_host_stats(id: u64, out: &Out) {
+  let mut sampler = peekr_common::HostSampler::new();
+  loop {
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    if out
+      .send(AgentMsg {
+        id,
+        resp: Resp::HostStat(sampler.sample()),
       })
       .is_err()
     {
