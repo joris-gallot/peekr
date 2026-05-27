@@ -9,6 +9,11 @@ web/dist/
 *.local
 .DS_Store
 
+# Database (runtime SQLite + WAL/SHM sidecars)
+*.db
+*.db-wal
+*.db-shm
+
 # Env
 .env
 .env.*

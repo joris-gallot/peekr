@@ -6,8 +6,9 @@ use axum::{
   Json, Router,
   extract::{Path, Query, State},
   http::StatusCode,
+  middleware::from_fn_with_state,
   response::sse::{Event, KeepAlive, Sse},
-  routing::get,
+  routing::{get, post},
 };
 use bollard::Docker;
 use bollard::container::LogOutput;
@@ -16,12 +17,18 @@ use bollard::query_parameters::{
 };
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
 use tokio_stream::Stream;
 use tower_http::cors::CorsLayer;
+
+pub mod auth;
+pub mod db;
 
 #[derive(Clone)]
 pub struct AppState {
   pub docker: Arc<Docker>,
+  pub db: SqlitePool,
+  pub secret: Arc<Vec<u8>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -55,11 +62,23 @@ pub async fn connect_docker() -> anyhow::Result<Docker> {
 }
 
 pub fn build_app(state: AppState) -> Router {
-  let app = Router::new()
-    .route("/api/healthz", get(healthz))
+  // docker routes require a valid session cookie
+  let protected = Router::new()
     .route("/api/containers", get(list_containers))
     .route("/api/containers/{id}/logs", get(stream_logs))
     .route("/api/containers/{id}/stats", get(stream_stats))
+    .layer(from_fn_with_state(state.clone(), auth::require_auth));
+
+  let public = Router::new()
+    .route("/api/healthz", get(healthz))
+    .route("/api/auth/first-run", get(auth::first_run))
+    .route("/api/auth/signup", post(auth::signup))
+    .route("/api/auth/login", post(auth::login))
+    .route("/api/auth/logout", post(auth::logout))
+    .route("/api/auth/me", get(auth::me));
+
+  let app = public
+    .merge(protected)
     .layer(CorsLayer::permissive())
     .with_state(state);
 

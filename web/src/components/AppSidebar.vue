@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { ContainerInfo } from '@/types'
-import { Moon, Pin, Sun } from '@lucide/vue'
+import { LogOut, Moon, Pin, Sun } from '@lucide/vue'
 import { useDark, useLocalStorage, useToggle } from '@vueuse/core'
 import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import ContainerRow from '@/components/ContainerRow.vue'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -23,6 +24,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from '@/components/ui/sidebar'
+import { useAuth } from '@/composables/useAuth'
 import { groupContainers, partitionPinned } from '@/lib/group'
 
 const props = defineProps<{
@@ -39,8 +41,15 @@ const filter = ref('')
 const openGroups = useLocalStorage<Record<string, boolean>>('peekr.openGroups', {})
 const pins = useLocalStorage<string[]>('peekr.pins', [])
 
-const isDark = useDark({ initialValue: 'dark' })
+const isDark = useDark() // follows system by default, persists explicit choice
 const toggleDark = useToggle(isDark)
+
+const router = useRouter()
+const { user, logout } = useAuth()
+async function onLogout() {
+  await logout()
+  router.push('/login')
+}
 
 const filterActive = computed(() => filter.value.trim().length > 0)
 const filtered = computed(() =>
@@ -154,6 +163,12 @@ function setGroupOpen(project: string, open: boolean) {
             <Sun v-if="isDark" />
             <Moon v-else />
             <span>{{ isDark ? 'Light mode' : 'Dark mode' }}</span>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <SidebarMenuButton class="text-muted-foreground" @click="onLogout">
+            <LogOut />
+            <span class="truncate">{{ user ? `Sign out (${user.email})` : 'Sign out' }}</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>
