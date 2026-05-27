@@ -19,12 +19,12 @@ const props = withDefaults(defineProps<{
 })
 
 const LEVEL_CHIP: Record<LogLevel, string> = {
-  trace: 'bg-zinc-500/15 text-zinc-400',
-  debug: 'bg-zinc-500/20 text-zinc-300',
-  info: 'bg-sky-500/15 text-sky-300',
-  warn: 'bg-amber-500/15 text-amber-300',
-  error: 'bg-red-500/15 text-red-300',
-  fatal: 'bg-rose-600/25 text-rose-200',
+  trace: 'bg-zinc-500/10 text-zinc-600 dark:bg-zinc-500/15 dark:text-zinc-400',
+  debug: 'bg-zinc-500/10 text-zinc-600 dark:bg-zinc-500/20 dark:text-zinc-300',
+  info: 'bg-sky-500/10 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300',
+  warn: 'bg-amber-500/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300',
+  error: 'bg-red-500/10 text-red-700 dark:bg-red-500/15 dark:text-red-300',
+  fatal: 'bg-rose-600/15 text-rose-700 dark:bg-rose-600/25 dark:text-rose-200',
 }
 const LEVEL_ACCENT: Record<LogLevel, string> = {
   trace: 'border-l-zinc-600/40',
@@ -35,11 +35,11 @@ const LEVEL_ACCENT: Record<LogLevel, string> = {
   fatal: 'border-l-rose-500/80',
 }
 const KIND_CLASS: Record<JsonValueKind, string> = {
-  string: 'text-emerald-300',
-  number: 'text-amber-300',
-  boolean: 'text-violet-300',
+  string: 'text-emerald-700 dark:text-emerald-300',
+  number: 'text-amber-700 dark:text-amber-300',
+  boolean: 'text-violet-700 dark:text-violet-300',
   null: 'text-zinc-500',
-  complex: 'text-sky-300',
+  complex: 'text-sky-700 dark:text-sky-300',
 }
 
 const pane = ref<HTMLElement | null>(null)
@@ -75,7 +75,7 @@ function accentClass(e: Entry) {
 }
 function msgClass(e: Entry) {
   if (e.stream === 'stderr' && !e.log.level)
-    return 'text-red-300'
+    return 'text-red-700 dark:text-red-300'
   return 'text-foreground/90'
 }
 function toggle(e: Entry) {

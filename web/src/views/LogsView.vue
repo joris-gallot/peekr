@@ -18,7 +18,7 @@ import { mergeByTime } from '@/lib/merge'
 import { isRunning } from '@/types'
 
 // stable per-container accent colors for the merged timeline / split headers
-const PALETTE = ['#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#f472b6', '#fb923c', '#22d3ee', '#a3e635']
+const PALETTE = ['#0ea5e9', '#8b5cf6', '#10b981', '#f59e0b', '#ec4899', '#f97316', '#06b6d4', '#84cc16']
 
 const route = useRoute()
 const router = useRouter()
