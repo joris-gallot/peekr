@@ -1,28 +1,34 @@
 <script setup lang="ts">
 import type { ContainerInfo } from '@/types'
-import { LogOut, Moon, Pin, Sun } from '@lucide/vue'
-import { useDark, useLocalStorage, useToggle } from '@vueuse/core'
+import { LogOut, Monitor, Moon, Pin, Settings2, Sun } from '@lucide/vue'
+import { useColorMode, useLocalStorage } from '@vueuse/core'
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import ContainerRow from '@/components/ContainerRow.vue'
-import { Badge } from '@/components/ui/badge'
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
 } from '@/components/ui/sidebar'
 import { useAuth } from '@/composables/useAuth'
 import { groupContainers, partitionPinned } from '@/lib/group'
@@ -41,11 +47,11 @@ const filter = ref('')
 const openGroups = useLocalStorage<Record<string, boolean>>('peekr.openGroups', {})
 const pins = useLocalStorage<string[]>('peekr.pins', [])
 
-const isDark = useDark() // follows system by default, persists explicit choice
-const toggleDark = useToggle(isDark)
+// 'auto' (system) | 'light' | 'dark', default system
+const mode = useColorMode()
 
 const router = useRouter()
-const { user, logout } = useAuth()
+const { logout } = useAuth()
 async function onLogout() {
   await logout()
   router.push('/login')
@@ -85,9 +91,31 @@ function setGroupOpen(project: string, open: boolean) {
     <SidebarHeader class="gap-2 border-b">
       <div class="flex items-center gap-2">
         <span class="text-lg font-semibold tracking-tight">peekr</span>
-        <Badge variant="secondary" class="ml-auto">
-          {{ containers.length }}
-        </Badge>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            class="ml-auto flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent"
+          >
+            <Settings2 class="size-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" class="w-40">
+            <DropdownMenuLabel>Theme</DropdownMenuLabel>
+            <DropdownMenuRadioGroup v-model="mode">
+              <DropdownMenuRadioItem value="auto">
+                <Monitor class="size-4" />System
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="light">
+                <Sun class="size-4" />Light
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="dark">
+                <Moon class="size-4" />Dark
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem @click="onLogout">
+              <LogOut class="size-4" />Sign out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       <Input v-model="filter" placeholder="Filter containers..." class="h-8" />
     </SidebarHeader>
@@ -155,23 +183,5 @@ function setGroupOpen(project: string, open: boolean) {
         No containers
       </p>
     </SidebarContent>
-
-    <SidebarFooter class="border-t">
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuButton class="text-muted-foreground" @click="toggleDark()">
-            <Sun v-if="isDark" />
-            <Moon v-else />
-            <span>{{ isDark ? 'Light mode' : 'Dark mode' }}</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-        <SidebarMenuItem>
-          <SidebarMenuButton class="text-muted-foreground" @click="onLogout">
-            <LogOut />
-            <span class="truncate">{{ user ? `Sign out (${user.email})` : 'Sign out' }}</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      </SidebarMenu>
-    </SidebarFooter>
   </Sidebar>
 </template>
